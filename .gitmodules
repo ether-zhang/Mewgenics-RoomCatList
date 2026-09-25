@@ -1,0 +1,12 @@
+[submodule "vendor/imgui"]
+	path = vendor/imgui
+	url = https://github.com/ocornut/imgui.git
+	ignore = untracked
+[submodule "vendor/mew-ui-api"]
+	path = vendor/mew-ui-api
+	url = https://github.com/Pseudonym-Tim/mewgenics-ui-api.git
+	ignore = untracked
+[submodule "vendor/mewjector"]
+	path = vendor/mewjector
+	url = https://github.com/githubuser508/mewjector.git
+	ignore = untracked

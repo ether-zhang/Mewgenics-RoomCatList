@@ -1,0 +1,16 @@
+build/
+dist/
+*.log
+*.dll
+*.exp
+*.lib
+*.obj
+vendor/**/.git/
+__pycache__/
+*.py[cod]
+/swfs/house.swf
+/src/trait_catalog.generated.hpp
+/src/marker_icons.generated.hpp
+/ui-state.ini
+/src/ui_skin.generated.hpp
+/assets/native-ui.ttf
