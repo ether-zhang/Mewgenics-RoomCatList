@@ -3,13 +3,13 @@
 namespace {
 roomcats::RoomSnapshot world;
 int writes=0, inspected=0;
-bool accepts_primary=true, interrupt_after_delivery=false;
+bool accepts_primary=true, accepts_secondary=true, interrupt_after_delivery=false;
 std::vector<int> delivered;
 bool capture_text=false;
 std::string rendered_text;
 std::uint64_t now=10000;
 roomcats::Cat* Find(std::uint64_t id) { for(auto& c:world.cats) if(c.id==id) return &c; return nullptr; }
-std::vector<roomcats::NpcChoice> Choices(const roomcats::RoomSnapshot&,const roomcats::Cat&) { return {{0,"NPC",accepts_primary,"Not accepting"},{3,"Next NPC",true,""},{8,"Discard",true,""}}; }
+std::vector<roomcats::NpcChoice> Choices(const roomcats::RoomSnapshot&,const roomcats::Cat&) { return {{0,"NPC",accepts_primary,"Not accepting"},{3,"Next NPC",accepts_secondary,"Not accepting"},{8,"Discard",true,""}}; }
 bool CanMove(const roomcats::RoomSnapshot&,const roomcats::Cat&,const roomcats::CatLocation&,std::string&) { return true; }
 bool MoveCat(const roomcats::RoomSnapshot&,const roomcats::Cat& c,const roomcats::CatLocation& room,std::string&) {
     ++writes; auto* actual=Find(c.id); actual->location_key=room.key; actual->location_label=room.label; actual->location=room.component; return true;
@@ -116,7 +116,14 @@ int TestScreeningPanel() {
     CHECK_NEWBORN(GetNewbornBatchStatus().stopped && writes==1 && !Find(20)->active && Find(21)->active);
     Toolbar(); Frame(4); // The "recheck" action retains the adult script.
     CHECK_NEWBORN(g_view.screening && !g_screening_submitted && g_screening_plan->kind==ScreeningKind::Adult && g_snapshot.cats.size()==2);
-    CHECK_NEWBORN(ScreeningDecision(21)->choice==ReviewChoice::Npc && ScreeningDecision(21)->npc==0 && ScreeningChoiceLabel(*ScreeningDecision(21))=="送至 NPC");
+    CHECK_NEWBORN(ScreeningDecision(21)->choice==ReviewChoice::Npc && ScreeningDecision(21)->npc==0 && ScreeningChoiceLabel(*ScreeningDecision(21))=="不可用：NPC");
+    accepts_secondary=false;
+    Cell(0); capture_text=true; Frame();
+    CHECK_NEWBORN(g_mouse.PopupOpen() && rendered_text.find("不可用：NPC")!=std::string::npos);
+    CHECK_NEWBORN(rendered_text.find("不遗弃（原地保留）")!=std::string::npos && rendered_text.find("不可用：Next NPC")!=std::string::npos && writes==1);
+    CHECK_NEWBORN(ScreeningDecision(21)->choice==ReviewChoice::Npc && ScreeningDecision(21)->npc==0);
+    g_close_move_popup=true; Frame(2);
+    accepts_secondary=true;
     Toolbar(); Frame(4); CHECK_NEWBORN(!g_screening_submitted && writes==1); // Unavailable remembered choice cannot execute.
     auto resumed=world; resumed.scene=9999; ++resumed.generation;
     world={}; Frame(3); // A native scene transition clears the panel state.

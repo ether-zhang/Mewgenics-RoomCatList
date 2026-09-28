@@ -120,9 +120,13 @@ void PollMousePosition() {
 }
 
 bool RefreshInputPointer() {
-    if (!g_initialized || g_failed) return false;
+    // This callback is hit by native mouse and SDL getter hooks. A closed or
+    // unfocused list must not query cursor memory or publish capture on every
+    // game input poll.
+    if (!g_initialized || g_failed || !g_open || !g_has_house ||
+        GetForegroundWindow() != g_window) return false;
     PollMousePosition();
-    return g_open && g_has_house && GetForegroundWindow() == g_window;
+    return true;
 }
 
 void CancelMouseInput(HWND window) {
@@ -333,7 +337,7 @@ bool Initialize(HDC dc) {
     const bool native_started = roomcats::StartNativeSidebar(NativeSidebarClicked, DrawListBeforeCursor, g_mouse, RefreshInputPointer);
     if (!native_started)
         Log("Native sidebar could not start. See mod_logs/chainloader.log for the native-UI diagnostic.");
-    Log(std::string("RoomCatList 0.15.3 ready; native sidebar/input startup=") + (native_started ? "yes" : "no") + "; English/Chinese list text; native paper/font skin and sidebar artwork.");
+    Log(std::string("RoomCatList 0.15.7 ready; native sidebar/input startup=") + (native_started ? "yes" : "no") + "; native NPC visit sequencing; Dwarfism classified as ordinary good mutation.");
     return native_started;
 }
 
@@ -422,11 +426,25 @@ void DrawListBeforeCursor() {
                 g_last_poll = 0;
                 Log("Cat action: id=" + std::to_string(action_result.cat) + "; success=" + (action_result.success ? "yes" : "no") + "; " + action_result.message);
             }
-            PollRoom(false);
+            const bool toggle = g_native_toggle_requested.exchange(false, std::memory_order_acq_rel);
+            if (toggle && g_open) g_open = false;
+            else if (toggle) {
+                // The native sidebar button only exists in House. Read its
+                // cats once on opening instead of scanning the house every
+                // 250 ms while the list is closed.
+                PollRoom(true);
+                g_open = g_has_house;
+            }
+            if (g_open) PollRoom(false);
             HandleScreeningRequests();
-            if (g_native_toggle_requested.exchange(false, std::memory_order_acq_rel) && g_has_house) {
-                g_open = !g_open;
-                if (g_open) PollRoom(true);
+            if (!g_open && !g_was_open) {
+                // Keep native batch/action ticks in UiTick, but avoid an
+                // ImGui/OpenGL frame when there is no visible list. The first
+                // frame after closing still runs to clear its view/input.
+                g_panel_rect = {};
+                g_pad_frame = {};
+                PublishMouseCapture();
+                return;
             }
             if (!UpdateFont()) g_failed = true;
             else {

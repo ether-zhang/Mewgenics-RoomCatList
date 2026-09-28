@@ -24,7 +24,11 @@ void SetupScreeningColumns() {
     for(int col=Parents;col<CatColumnCount;++col) setup(col);
     ImGui::TableSetupColumn(roomcats::Tx("筛选原因"),ImGuiTableColumnFlags_WidthFixed,420);
 }
-std::string ScreeningChoiceLabel(const roomcats::NewbornDecision& d) {
+std::string ScreeningNpcLabel(const roomcats::NpcChoice& choice) {
+    // Put status first so it remains visible in a narrow destination column.
+    return std::string(roomcats::Tx(choice.enabled ? "送至 " : choice.transient ? "等待：" : "不可用："))+choice.label;
+}
+std::string ScreeningChoiceLabel(const roomcats::NewbornDecision& d,const std::vector<roomcats::NpcChoice>* known_choices=nullptr) {
     using namespace roomcats;
     if(d.choice==ReviewChoice::Keep) return roomcats::Tx("不遗弃（原地保留）");
     if(d.choice==ReviewChoice::Location) {
@@ -32,8 +36,10 @@ std::string ScreeningChoiceLabel(const roomcats::NewbornDecision& d) {
         return roomcats::Tx("移至 ")+(d.selection_label.empty() ? d.alternative_location : roomcats::LocalizedLocationLabel(d.alternative_location,d.selection_label));
     }
     if(d.choice==ReviewChoice::Npc) {
-        for(const auto& c:CatNpcChoices(g_screening_plan->source,d.cat.id)) if(c.npc==d.npc) return roomcats::Tx("送至 ")+c.label;
-        return roomcats::Tx("送至 ")+std::string(roomcats::NpcLabel(d.npc));
+        const auto queried=known_choices ? std::vector<NpcChoice>{} : CatNpcChoices(g_screening_plan->source,d.cat.id);
+        const auto& choices=known_choices ? *known_choices : queried;
+        for(const auto& c:choices) if(c.npc==d.npc) return ScreeningNpcLabel(c);
+        return roomcats::Tx("不可用：")+std::string(roomcats::NpcLabel(d.npc));
     }
     return roomcats::Tx("遗弃");
 }
@@ -41,21 +47,32 @@ void DrawScreeningChoice(const roomcats::Cat& cat) {
     using namespace roomcats;
     auto* decision=ScreeningDecision(cat.id);
     if(!decision) return;
+    auto npc_choices=decision->choice==ReviewChoice::Npc ? CatNpcChoices(g_screening_plan->source,cat.id) : std::vector<NpcChoice>{};
+    const auto selected=std::find_if(npc_choices.begin(),npc_choices.end(),[&](const auto& c) { return c.npc==decision->npc; });
+    const bool unavailable=decision->choice==ReviewChoice::Npc && (selected==npc_choices.end() || !selected->enabled);
     ImGui::PushID(reinterpret_cast<void*>(static_cast<std::uintptr_t>(cat.id)));
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::BeginDisabled(g_screening_submitted || NewbornBatchActive());
-    const bool expanded=roomcats::ui::BeginCombo("##ScreeningChoice",ScreeningChoiceLabel(*decision).c_str(),ImGuiComboFlags_HeightLarge);
+    if(unavailable) ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    const bool expanded=roomcats::ui::BeginCombo("##ScreeningChoice",ScreeningChoiceLabel(*decision,&npc_choices).c_str(),ImGuiComboFlags_HeightLarge);
+    if(unavailable) ImGui::PopStyleColor();
     const bool hovered=ImGui::IsItemHovered();
     if(expanded) {
+        if(decision->choice!=ReviewChoice::Npc) npc_choices=CatNpcChoices(g_screening_plan->source,cat.id);
         g_move_popup_cat=cat.id; g_move_popup_drawn=true; g_mouse.SetPopupOpen(true); ClearTraitHover();
         bool changed=false;
         if(ImGui::Selectable(roomcats::Tx("遗弃"),decision->choice==ReviewChoice::Discard)) { decision->choice=ReviewChoice::Discard; changed=true; }
         if(ImGui::Selectable(roomcats::Tx("不遗弃（原地保留）"),decision->choice==ReviewChoice::Keep)) { decision->choice=ReviewChoice::Keep; changed=true; }
         ImGui::Separator();
-        for(const auto& choice:CatNpcChoices(g_screening_plan->source,cat.id)) {
+        if(unavailable && selected==npc_choices.end()) {
+            ImGui::BeginDisabled();
+            ImGui::Selectable(ScreeningChoiceLabel(*decision,&npc_choices).c_str(),true);
+            ImGui::EndDisabled();
+        }
+        for(const auto& choice:npc_choices) {
             if(choice.npc==8) continue;
             ImGui::PushID(choice.npc); ImGui::BeginDisabled(!choice.enabled);
-            if(ImGui::Selectable((roomcats::Tx("送至 ")+choice.label).c_str(),decision->choice==ReviewChoice::Npc && decision->npc==choice.npc)) {
+            if(ImGui::Selectable(ScreeningNpcLabel(choice).c_str(),decision->choice==ReviewChoice::Npc && decision->npc==choice.npc)) {
                 decision->choice=ReviewChoice::Npc; decision->npc=choice.npc;
                 decision->selection_label=choice.label; changed=true;
             }
@@ -74,11 +91,8 @@ void DrawScreeningChoice(const roomcats::Cat& cat) {
         }
         if(changed) g_screening_choices.Remember(*g_screening_plan,*decision);
         ImGui::EndCombo();
-    } else if(hovered && !g_screening_submitted && decision->choice==ReviewChoice::Npc) {
-        const auto choices=CatNpcChoices(g_screening_plan->source,cat.id);
-        const auto found=std::find_if(choices.begin(),choices.end(),[&](const auto& c) { return c.npc==decision->npc; });
-        if(found==choices.end() || !found->enabled)
-            ImGui::SetTooltip(roomcats::Tx("已保留原选择：%s。请等待或手动修改去向。"),found==choices.end() ? roomcats::Tx("此NPC当前不可用") : found->reason.c_str());
+    } else if(hovered && !g_screening_submitted && unavailable) {
+        ImGui::SetTooltip(roomcats::Tx("已保留原选择：%s。请等待或手动修改去向。"),selected==npc_choices.end() ? roomcats::Tx("此NPC当前不可用") : selected->reason.c_str());
     }
     ImGui::EndDisabled(); ImGui::PopID();
 }

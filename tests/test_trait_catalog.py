@@ -55,14 +55,19 @@ class TraitCatalogTests(unittest.TestCase):
         self.assertIn('史蒂文', definitions['DejaVu', 3][1])
         self.assertIn('250%', definitions['Distemper', 10][1])
 
-    def test_chungus_is_the_only_positive_disorder(self):
+    def test_positive_disorders_have_separate_quality_ranking(self):
         _, disorders, _, _ = load_catalog(GameArchive(ROOT.parents[1] / 'resources.gpak'))
-        positives = [d for d in disorders if d[5]]
-        self.assertEqual(positives, [('Chungus', '大块头', '体质 +4', 0, (0, 0, 4, 0, 0, 0, 0), True)])
+        positives = {d[0]: d for d in disorders if d[5]}
+        self.assertEqual(set(positives), {'Chungus', 'Dwarfism'})
+        self.assertEqual(positives['Chungus'], ('Chungus', '大块头', '体质 +4', 0, (0, 0, 4, 0, 0, 0, 0), True, True))
+        dwarf = positives['Dwarfism']
+        self.assertEqual(dwarf[1], '侏儒症')
+        self.assertIn('闪避几率+10%', dwarf[2])
+        self.assertEqual(dwarf[4:], ((-2, 2, -2, 0, 2, 0, 2), True, False))
         # Other stat boosts do not grant a blanket disease exemption.
         definitions = {d[0]: d for d in disorders}
-        for ident in ('Gigantism', 'Gargantuan', 'Gigachad', 'FattyLiver', 'Touched', 'Rabies'):
-            self.assertFalse(definitions[ident][5])
+        for ident in ('PrimordialDwarf', 'Gigantism', 'Gargantuan', 'Gigachad', 'FattyLiver', 'Touched', 'Rabies'):
+            self.assertEqual(definitions[ident][5:], (False, False))
 
     def test_english_catalog_tracks_the_same_native_ids_and_effects(self):
         archive = GameArchive(ROOT.parents[1] / 'resources.gpak')
@@ -75,6 +80,8 @@ class TraitCatalogTests(unittest.TestCase):
         self.assertEqual([t[0] for t in zh_titles], [t[0] for t in en_titles])
         english = {d[0]:d for d in en_disorders}
         self.assertEqual(english['Chungus'][1:3], ('Chungus','Constitution +4'))
+        self.assertEqual(english['Dwarfism'][1], 'Dwarfism')
+        self.assertIn('+10% dodge chance.', english['Dwarfism'][2])
         self.assertIn('Strength', english['Rabies'][2])
         self.assertIn('Constitution +1', next(m[3] for m in en_mutations if m[0:2] == ('body',300)))
 

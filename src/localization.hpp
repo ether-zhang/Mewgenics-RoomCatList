@@ -73,6 +73,7 @@ inline const char* Tx(const char* chinese) {
         {"不遗弃（原地保留）", "Keep (leave in place)"}, {"移至 ", "Move to "},
         {"送至 ", "Send to "}, {"送至 NPC ", "Send to NPC "}, {"遗弃", "Discard"},
         {"此NPC当前不可用", "This NPC is currently unavailable"},
+        {"不可用：", "Unavailable: "}, {"等待：", "Waiting: "},
         {"已保留原选择：%s。请等待或手动修改去向。", "Original selection kept: %s. Wait or change the destination manually."},
         {"无可遗弃。本轮处理进度见下方。", "No cats to discard. Processing progress is below."},
         {"无可遗弃，存在调房：%d 只猫咪。", "No cats to discard; %d cats have room moves."},

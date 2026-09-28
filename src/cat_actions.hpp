@@ -19,6 +19,9 @@ struct CatAction {
     std::uintptr_t pipe = 0, map = 0;
     std::uint64_t pipe_generation = 0, map_generation = 0;
     std::string marker;
+    std::uintptr_t drawer_ui = 0, cat_database = 0;
+    std::uint64_t drawer_generation = 0;
+    int game_day = -1;
 };
 struct CatActionResult {
     bool success = false, hide_list = false;

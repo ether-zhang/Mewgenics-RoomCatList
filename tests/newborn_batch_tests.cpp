@@ -9,11 +9,17 @@ int writes=0, marks=0,moves=0,donations=0;
 bool accepts=true,one_npc=false;
 bool delayed_reset=false;
 int reset_frames=0;
+bool npc_cutscene=false,map_open=false;
+bool skip_removal=false;
+int cutscene_frames=0,closed_maps=0;
+int delivery_frames=0,transition_frames=0,visits=0;
+bool pipe_mode=false;
 std::vector<std::pair<std::uint64_t,int>> sent;
 roomcats::Cat* Find(std::uint64_t id) { for(auto& c:world.cats) if(c.id==id) return &c; return nullptr; }
 std::vector<roomcats::NpcChoice> Choices(const roomcats::RoomSnapshot&,const roomcats::Cat&) {
-    return {{0,"NPC",accepts && !reset_frames,"Unavailable",accepts && reset_frames>0},
-            {8,"Discard",!reset_frames,"Waiting for pipe reset",reset_frames>0}};
+    const bool busy=reset_frames>0 || map_open;
+    return {{0,"NPC",accepts && !busy,"Unavailable",accepts && busy},
+            {8,"Discard",!busy,"Waiting for pipe reset",busy}};
 }
 bool CanMove(const roomcats::RoomSnapshot&,const roomcats::Cat&,const roomcats::CatLocation&,std::string&) { return true; }
 bool Move(const roomcats::RoomSnapshot&,const roomcats::Cat& c,const roomcats::CatLocation& room,std::string&) {
@@ -24,19 +30,41 @@ roomcats::CatActionStatus Action(const roomcats::RoomSnapshot&,roomcats::CatActi
     auto* c=Find(a.cat);
     if(a.kind==CatActionKind::Mark) { ++writes; ++marks; c->details.marker=a.marker; return CatActionStatus::Complete; }
     if(!a.phase) { a.phase=1; return CatActionStatus::Running; }
-    ++writes; ++donations; c->active=false; sent.push_back({a.cat,a.npc}); if(one_npc) accepts=false;
+    if(npc_cutscene && a.phase>=2) {
+        if(a.phase==2) {
+            if(delivery_frames>0 || pipe_mode) return CatActionStatus::Running;
+            ++closed_maps; map_open=false; a.phase=3; return CatActionStatus::Running;
+        }
+        return CatActionStatus::Complete;
+    }
+    ++writes; ++donations; if(!skip_removal) c->active=false; sent.push_back({a.cat,a.npc}); if(one_npc) accepts=false;
+    if(npc_cutscene) {
+        a.phase=2; map_open=pipe_mode=true; delivery_frames=5;
+        return CatActionStatus::Running;
+    }
     if(delayed_reset) { reset_frames=3; std::reverse(world.locations.begin(),world.locations.end()); }
     return CatActionStatus::Complete;
 }
 void Reset() {
     roomcats::ConfigureCatActions(Choices,Action); roomcats::ConfigureCatMoves(CanMove,Move);
     writes=marks=moves=donations=0; sent.clear(); accepts=true; one_npc=delayed_reset=false; reset_frames=0;
+    npc_cutscene=map_open=false; cutscene_frames=closed_maps=0;
+    delivery_frames=transition_frames=visits=0; pipe_mode=false;
+    skip_removal=false;
 }
 void Pump(std::uint64_t time) {
     using namespace roomcats;
     auto fresh=world; if(!NewbornBatchNeedsCats()) fresh.cats.clear();
     TickNewbornBatch(fresh,time); ProcessCatMove(world); ProcessCatAction(world,time);
     if(reset_frames>0) --reset_frames;
+    if(delivery_frames>0) {
+        if(--delivery_frames==0) transition_frames=3;
+    } else if(transition_frames>0) {
+        if(--transition_frames==0) {
+            ++visits; pipe_mode=false; cutscene_frames=45;
+            world.suspended=true; world.valid=world.in_house=false;
+        }
+    } else if(cutscene_frames>0 && --cutscene_frames==0) { world.suspended=false; world.valid=world.in_house=true; }
 }
 }
 int TestNewbornBatch() {
@@ -108,6 +136,40 @@ int TestNewbornBatch() {
     world.cats={MakeCat(50,4,49,51,10)}; plan=PlanAdultCats(world,49);
     CHECK_NEWBORN(BeginNewbornBatch(plan,world,reason)); world.locations[0].comfort_base+=1;
     Pump(50000); CHECK_NEWBORN(!NewbornBatchActive() && writes==0 && GetNewbornBatchStatus().stopped);
+    // Both planners wait through disposal, the native countdown, a queued
+    // transition, and >30s NPC cutscenes before map cleanup / the next cat.
+    for(auto kind:{ScreeningKind::Newborn,ScreeningKind::Adult}) {
+        Reset(); npc_cutscene=true; world=House(); world.population_comfort_valid=true;
+        world.locations[0].comfort_base=15; world.locations[1].comfort_base=world.locations[2].comfort_base=5;
+        world.cats={MakeCat(61,4,49,51,10),MakeCat(62,4,49,51,10),MakeCat(63,4,49,51,10)};
+        plan=kind==ScreeningKind::Adult ? PlanAdultCats(world,50) : PlanNewbornCats(world,50);
+        for(auto& d:plan.decisions) { d.choice=ReviewChoice::Npc; d.npc=0; }
+        CHECK_NEWBORN(BeginNewbornBatch(plan,world,reason));
+        std::uint64_t time=60000; bool skipped_cutscene=false;
+        for(unsigned i=0;i<180 && NewbornBatchActive();++i) {
+            if(world.suspended && !skipped_cutscene) {
+                // First office animation has no ready-scene callbacks at all.
+                time+=60000; cutscene_frames=0; skipped_cutscene=true;
+                world.suspended=false; world.valid=world.in_house=true;
+            }
+            const auto prior=donations;
+            const auto prior_closes=closed_maps;
+            const bool paused=world.suspended;
+            const bool native_pending=delivery_frames>0 || transition_frames>0;
+            Pump(time); time+=1000;
+            if(paused || native_pending) CHECK_NEWBORN(donations==prior && closed_maps==prior_closes);
+        }
+        CHECK_NEWBORN(GetNewbornBatchStatus().finished && donations==3 && visits==3 && closed_maps==3 && !map_open);
+        CHECK_NEWBORN(GetNewbornBatchStatus().kind==kind && !HasPendingCatAction());
+    }
+    // A callback's success without the expected native result must remain
+    // bounded, even though long cutscenes no longer exhaust the batch timer.
+    Reset(); skip_removal=true; world=House(); world.cats={MakeCat(71,4,49,51,10)};
+    plan=PlanNewbornCats(world,51); CHECK_NEWBORN(BeginNewbornBatch(plan,world,reason));
+    Pump(300000); Pump(300100); Pump(300200);
+    CHECK_NEWBORN(NewbornBatchActive() && donations==1 && Find(71)->active);
+    TickNewbornBatch(world,341000);
+    CHECK_NEWBORN(!NewbornBatchActive() && GetNewbornBatchStatus().stopped && donations==1 && Find(71)->active);
     ConfigureCatActions(nullptr,nullptr); ConfigureCatMoves(nullptr,nullptr);
     std::cout << "Newborn batch passed: no pre-confirmation writes, one batch, marker/move/NPC/discard order, keep override, completion checks, day-change cancellation and no destructive fallback.\n";
     return 0;

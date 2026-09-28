@@ -124,6 +124,15 @@ int TestAdultPlan() {
     s.cats[3].details.diseases.clear(); s.cats[3].details.bad.push_back({"Bad",""});
     p=PlanAdultCats(s,17);
     CHECK_NEWBORN(Room(Decision(p,1))==4 && !Decision(p,1).discard);
+    // Dwarfism is ordinary good: the class wins this otherwise equal tie,
+    // and the dwarf cat remains eligible for the lower breeding rooms.
+    s.cats[3].details.bad.clear(); s.cats[3].details.good={LookupDisorder("Dwarfism")};
+    CHECK_NEWBORN(QualityMutations(s.cats[3].details)==0 && !BreedingHealthRisk(s.cats[3]));
+    p=PlanAdultCats(s,17); CHECK_NEWBORN(p.Valid());
+    CHECK_NEWBORN(Room(Decision(p,1))>0 && Room(Decision(p,1))<4 && !Decision(p,1).discard);
+    CHECK_NEWBORN(Room(Decision(p,2))==0);
+    s.cats[3].details.diseases.push_back(LookupDisorder("Rabies")); p=PlanAdultCats(s,17);
+    CHECK_NEWBORN(Room(Decision(p,1))==4 && !Decision(p,1).discard);
     std::cout << "Adult planner passed: genetic tiers, comfort/aura capacities, balanced second floor, health/inbreeding, adult-only scope, house protection, combat ranking, total 90, Chungus exception, review overrides and stale-plan rejection.\n";
     return 0;
 }

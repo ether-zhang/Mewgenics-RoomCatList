@@ -107,13 +107,14 @@ void TickNewbornBatch(const RoomSnapshot& fresh,std::uint64_t now) {
             MoveResult r;
             if(TakeCatMoveResult(r)) {
                 if(r.cat!=command.cat || !r.success) { Fail(r.message); return; }
+                if(!result_ready) started=now;
                 result_ready=true;
             }
         } else {
             CatActionResult r;
             if(TakeCatActionResult(r)) {
                 if(r.cat!=command.cat || !r.success) { Fail(r.message); return; }
-                if(r.completed) result_ready=true;
+                if(r.completed) { if(!result_ready) started=now; result_ready=true; }
                 status.message=r.message;
             }
         }
@@ -127,7 +128,9 @@ void TickNewbornBatch(const RoomSnapshot& fresh,std::uint64_t now) {
         return;
     }
     if(waiting) {
-        if(now-started>40000) { Fail(roomcats::Tx("当前操作等待超时，请查看原生界面")); return; }
+        // Pending native actions own their timeout and can verify a completed
+        // donation after a cutscene that supplied no ready-scene ticks.
+        if(now-started>40000 && (result_ready || command.kind==Kind::Move || !HasPendingCatAction())) { Fail(roomcats::Tx("当前操作等待超时，请查看原生界面")); return; }
         if(!result_ready) return;
         const auto* actual=Find(fresh,command.cat);
         const auto* before=Find(expected,command.cat);

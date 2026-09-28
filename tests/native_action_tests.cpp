@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <cstdlib>
 
 namespace {
 template<std::size_t N> using Bytes = std::array<unsigned char, N>;
@@ -62,6 +63,8 @@ struct Fixture {
 Fixture* fixture = nullptr;
 int placed = 0, clicked = 0, opened = 0;
 int discarded = 0;
+int closed = 0;
+bool close_finishes = false;
 bool accepts = true;
 int marked = 0;
 int refreshed = 0;
@@ -82,18 +85,87 @@ void __fastcall Place(void* pipe, void* cat) {
 }
 void __fastcall Click(void* map) { ++clicked; assert(std::uintptr_t(map) == fixture->map); }
 void __fastcall Discard(void* closure) { ++discarded; assert(static_cast<std::uintptr_t*>(closure)[1] == fixture->map); }
+void __fastcall Close(void* panel) {
+    ++closed;
+    assert(std::uintptr_t(panel)==600 && roomcats::Ptr(fixture->map+0x48)==0);
+    assert(roomcats::Value<double>(fixture->map+0xC0)<=0);
+    assert(!fixture->snapshot.suspended);
+    if(close_finishes) Write(fixture->ui,0x58,std::uintptr_t(0));
+}
 void __fastcall Open(void* drawer, void* cat, unsigned char force) {
     ++opened; assert(std::uintptr_t(drawer) == fixture->drawer && std::uintptr_t(cat) == fixture->cat && force == 1);
     Write(fixture->drawer,0x78,fixture->cat); Write(fixture->ui,0x58,std::uintptr_t(500));
 }
+
+void TestPostDonationAnimation(bool visit, bool no_paused_ticks, int npc) {
+    using namespace roomcats;
+    Fixture f; fixture=&f;
+    accepts=true; close_finishes=true;
+    const int closes_before=closed, clicks_before=clicked, discards_before=discarded;
+    Cat cat; cat.id=42; cat.component=f.cat; cat.generation=77; cat.location=f.room;
+    f.snapshot.cats.push_back(cat);
+    f.snapshot.game_day=42; f.snapshot.cat_database=Address(f.manager);
+    ConfigureCatActions(QueryNpcs,StepNativeAction);
+    assert(QueueCatAction(f.snapshot,42,CatActionKind::Donate,npc));
+    ProcessCatAction(f.snapshot,100);
+    CatActionResult result;
+    assert(TakeCatActionResult(result) && result.success && !result.completed);
+    Write(f.map,0x48,f.cat); Write(f.map,0x50,std::uint64_t(77));
+    Write(f.map,0x41,static_cast<unsigned char>(1)); Write(f.ui,0x58,std::uintptr_t(600));
+    ProcessCatAction(f.snapshot,110);
+
+    // Native disposal clears the actor first, then arms a 0.25s timer.
+    // Closing the map during that timer cancels the automatic NPC visit.
+    Write(f.cat,0x88,static_cast<unsigned char>(0)); Write(f.map,0x48,std::uintptr_t(0));
+    Write(f.map,0xB8,npc); Write(f.map,0xC0,0.25);
+    if(npc<8) Write(Address(f.progress),0x90+npc*0x78,static_cast<unsigned char>(visit));
+    ProcessCatAction(f.snapshot,120);
+    for(int i=1;i<=12;++i) {
+        Write(f.map,0xC0,0.25-i*0.02);
+        ProcessCatAction(f.snapshot,120+i*20);
+        assert(HasPendingCatAction() && closed==closes_before && !TakeCatActionResult(result));
+    }
+    Write(f.map,0xC0,-0.01);
+    std::uint64_t returned_at=1000;
+    if(visit) {
+        // QuickSwipeTransition has been queued, but House is not yet paused.
+        // A drained timer alone must not release the next batch operation.
+        for(int i=0;i<8;++i) {
+            ProcessCatAction(f.snapshot,400+i*20);
+            assert(HasPendingCatAction() && closed==closes_before && !TakeCatActionResult(result));
+        }
+        // The native visit callback resets pipe mode before entering the
+        // office. NPC readiness can remain set if rewards are still pending.
+        Write(f.map,0x41,static_cast<unsigned char>(0));
+        f.snapshot.suspended=true; f.snapshot.valid=f.snapshot.in_house=false;
+        if(!no_paused_ticks) {
+            ProcessCatAction(f.snapshot,1000); ProcessCatAction(f.snapshot,61000);
+            assert(HasPendingCatAction() && closed==closes_before && !TakeCatActionResult(result));
+        }
+        returned_at=62000;
+        f.snapshot.suspended=false; f.snapshot.valid=f.snapshot.in_house=true;
+    } else if(npc!=kDiscardDestination) {
+        // The game normally closes the map itself when no visit is due.
+        Write(f.ui,0x58,std::uintptr_t(0));
+    }
+    ProcessCatAction(f.snapshot,returned_at);
+    if(HasPendingCatAction()) ProcessCatAction(f.snapshot,returned_at+10);
+    assert(TakeCatActionResult(result) && result.success && result.completed && !HasPendingCatAction());
+    assert(closed==closes_before+(visit || npc==kDiscardDestination ? 1 : 0));
+    assert(clicked==clicks_before+(npc==kDiscardDestination ? 0 : 1));
+    assert(discarded==discards_before+(npc==kDiscardDestination ? 1 : 0));
+    ConfigureCatActions(nullptr,nullptr);
+}
 }
 
 int main() {
+    _set_error_mode(_OUT_TO_STDERR);
     roomcats::SetLanguage(roomcats::Language::Chinese);
     using namespace roomcats;
     Fixture f; fixture = &f;
     g_accept_npc = Accept; g_place_in_pipe = Place; g_open_cat = Open; g_npc_clicks.fill(Click);
     g_discard_click = Discard;
+    g_close_panel = Close;
     Cat c; c.id = 42; c.component = f.cat; c.generation = 77; c.location = f.room;
     const auto before = f.data;
     const auto choices = QueryNpcs(f.snapshot,c);
@@ -130,8 +202,17 @@ int main() {
     Write(f.map,0x48,std::uintptr_t(0)); Write(f.map,0xB8,int(0));
     assert(StepNativeAction(f.snapshot,a,message) == CatActionStatus::Failed); // Closing menu is not proof of donation.
     Write(f.cat,0x88,static_cast<unsigned char>(0));
-    assert(StepNativeAction(f.snapshot,a,message) == CatActionStatus::Complete);
+    assert(StepNativeAction(f.snapshot,a,message) == CatActionStatus::Running && a.phase==3 && closed==0);
+    assert(StepNativeAction(f.snapshot,a,message) == CatActionStatus::Running && a.phase==4 && closed==1);
+    for(int i=0;i<10;++i) assert(StepNativeAction(f.snapshot,a,message)==CatActionStatus::Running && closed==1);
     Write(f.ui,0x58,std::uintptr_t(0));
+    assert(StepNativeAction(f.snapshot,a,message) == CatActionStatus::Complete);
+    auto cleanup=a; cleanup.phase=3;
+    Write(f.ui,0x58,std::uintptr_t(500)); // A different native panel is left alone.
+    assert(StepNativeAction(f.snapshot,cleanup,message)==CatActionStatus::Complete && closed==1);
+    Write(f.ui,0x58,std::uintptr_t(600)); Write(f.map,0x48,f.cat);
+    assert(StepNativeAction(f.snapshot,cleanup,message)==CatActionStatus::Failed && closed==1);
+    Write(f.map,0x48,std::uintptr_t(0)); Write(f.ui,0x58,std::uintptr_t(0));
     Write(f.cat,0x88,static_cast<unsigned char>(1));
     a = f.action; a.kind = CatActionKind::Inspect;
     assert(StepNativeAction(f.snapshot,a,message) == CatActionStatus::Complete && opened == 1);
@@ -147,7 +228,10 @@ int main() {
     for (int i=0;i<10;++i) StepNativeAction(f.snapshot,a,message);
     assert(discarded == 1);
     Write(f.map,0x48,std::uintptr_t(0)); Write(f.map,0xB8,int(8)); Write(f.cat,0x88,static_cast<unsigned char>(0));
-    assert(StepNativeAction(f.snapshot,a,message) == CatActionStatus::Complete && message == "已遗弃");
+    close_finishes=true;
+    assert(StepNativeAction(f.snapshot,a,message)==CatActionStatus::Running && a.phase==3);
+    assert(StepNativeAction(f.snapshot,a,message)==CatActionStatus::Running && a.phase==4 && closed==2);
+    assert(StepNativeAction(f.snapshot,a,message)==CatActionStatus::Complete && message=="已遗弃");
     Write(f.cat,0x88,static_cast<unsigned char>(1)); Write(f.cat,0xE8,f.room);
     Write(Address(f.director),0x580,int(42)); Write(Address(f.data),0xC38,std::int64_t(41));
     g_assign_marker=AssignMarker; g_refresh_cat=Refresh; Write(f.ui,0x58,std::uintptr_t(500));
@@ -157,5 +241,9 @@ int main() {
     a.marker="unsupported"; assert(StepNativeAction(f.snapshot,a,message)==CatActionStatus::Failed && marked==1);
     a.marker="circle"; Write(Address(f.director),0x580,int(43));
     assert(StepNativeAction(f.snapshot,a,message)==CatActionStatus::Failed && marked==1);
+    TestPostDonationAnimation(false,false,0);
+    TestPostDonationAnimation(true,false,0);
+    TestPostDonationAnimation(true,true,0);
+    TestPostDonationAnimation(false,false,kDiscardDestination);
     std::cout << "Native actions passed: unlocked/disabled NPCs, preview immutability, pipe/menu/donation sequencing, revalidation, no duplicate click, verified completion and original cat panel call.\n";
 }

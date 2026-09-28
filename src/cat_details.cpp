@@ -61,13 +61,15 @@ bool LookupMutation(std::uint64_t key, Trait& trait, bool& bad) {
     return false;
 }
 
-Trait LookupDisorder(const std::string& id, std::int64_t level) {
+Trait LookupDisorder(const std::string& id, std::int64_t level, bool* positive_mutation) {
+    if (positive_mutation) *positive_mutation = false;
     const DisorderDefinition* best = nullptr;
     for (const auto& definition : kDisorderDefinitions)
         if (id == definition.id && definition.level <= std::max<std::int64_t>(1, level) &&
             (!best || definition.level > best->level)) best = &definition;
     if (best) {
-        Trait trait{best->name, best->effect, {}, best->positive_mutation};
+        if (positive_mutation) *positive_mutation = best->positive_mutation;
+        Trait trait{best->name, best->effect, {}, best->quality};
         trait.name_en = best->name_en;
         trait.effect_en = best->effect_en;
         std::memcpy(trait.stat_delta.data(), best->stat_delta, sizeof(Stats));
@@ -118,11 +120,12 @@ CatDetails ReadCatDetails(std::uintptr_t data, std::uint64_t id, int game_day) {
         std::string disorder;
         if (!ReadNarrowString(data + offset, disorder)) return CatDetails{};
         if (!disorder.empty() && disorder != "None") {
-            auto trait = LookupDisorder(disorder, Field<std::int64_t>(bytes, offset + 32));
-            // Chungus is a pure benefit: share one classification for the
-            // list, mutation totals and both screening planners. Native data
-            // and the effective stats already returned by the game stay intact.
-            (trait.quality ? out.good : out.diseases).push_back(std::move(trait));
+            bool positive_mutation = false;
+            auto trait = LookupDisorder(disorder, Field<std::int64_t>(bytes, offset + 32), &positive_mutation);
+            // List/screening exceptions need not be quality mutations:
+            // Dwarfism is ordinary good, while Chungus is quality good.
+            // Native data and the game's effective stats stay intact.
+            (positive_mutation ? out.good : out.diseases).push_back(std::move(trait));
         }
     }
     out.valid = true;

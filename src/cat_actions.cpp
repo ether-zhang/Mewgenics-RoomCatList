@@ -45,6 +45,7 @@ bool QueueCatAction(const RoomSnapshot& snapshot, std::uint64_t id, CatActionKin
     action.kind = kind; action.npc = npc;
     action.marker = marker;
     action.scene = snapshot.scene; action.scene_generation = snapshot.generation;
+    action.game_day = snapshot.game_day; action.cat_database = snapshot.cat_database;
     action.cat = id; action.component = cat->component; action.cat_generation = cat->generation;
     action.source = cat->location;
     g_action = action;
@@ -76,9 +77,28 @@ void ProcessCatAction(const RoomSnapshot& snapshot, std::uint64_t now) {
     try {
         const auto* cat = first ? FindActionCat(snapshot, action.cat) : nullptr;
         const bool same_cat = !first || (cat && !cat->record_only && cat->component == action.component && cat->generation == action.cat_generation && cat->location == action.source);
-        if (snapshot.valid && snapshot.in_house && snapshot.scene == action.scene && snapshot.generation == action.scene_generation && same_cat && g_action_step) {
-            if (!first && now - action.started > 30000) result.message = roomcats::Tx("投送等待已停止，请在原生界面确认当前状态");
-            else status = g_action_step(snapshot, action, result.message);
+        const bool same_house = snapshot.scene == action.scene && snapshot.generation == action.scene_generation &&
+            snapshot.game_day == action.game_day && snapshot.cat_database == action.cat_database;
+        if (same_house && snapshot.suspended) {
+            // An NPC office pauses House. Retain the in-flight action and
+            // exclude that pause from its timeout; never call native UI here.
+            action.started = now;
+            status = CatActionStatus::Running;
+            result.message = roomcats::Tx("等待返回家园后继续");
+        } else if (snapshot.valid && snapshot.in_house && same_house && same_cat && g_action_step) {
+            const bool expired=!first && now-action.started>30000;
+            const auto before_phase=action.phase;
+            if(expired && action.phase<2) result.message=roomcats::Tx("投送等待已停止，请在原生界面确认当前状态");
+            else {
+                // Some native transitions produce no ready-scene ticks. An
+                // already dispatched donation may verify completion/cleanup
+                // once on return, but an unconfirmed click is never retried.
+                status=g_action_step(snapshot,action,result.message);
+                if(expired && status==CatActionStatus::Running) {
+                    if(action.phase>before_phase) action.started=now;
+                    else { status=CatActionStatus::Failed; result.message=roomcats::Tx("投送等待已停止，请在原生界面确认当前状态"); }
+                }
+            }
         }
     } catch (...) { result.message = roomcats::Tx("本次操作中断，未自动重试"); }
     result.success = status != CatActionStatus::Failed;
@@ -102,7 +122,7 @@ void CancelCatAction() {
     std::lock_guard<std::mutex> lock(g_action_lock);
     ++g_action_epoch;
     if (g_action) {
-        const bool handed_off = g_action->phase == 2;
+        const bool handed_off = g_action->kind == CatActionKind::Donate && g_action->phase >= 2;
         g_action_result = CatActionResult{handed_off, false, g_action->cat, handed_off ?
             roomcats::Tx("投送操作已交由原生界面处理") : roomcats::Tx("场景已变化，后续操作已取消")};
         g_action_result->completed = true;

@@ -3,6 +3,7 @@
 #include "ui_test_host.hpp"
 #include <cassert>
 #include <iostream>
+#include <cstdlib>
 int TestParentPanel();
 int TestNewbornPlan();
 int TestAdultPlan();
@@ -71,6 +72,7 @@ ImGuiWindow* ScrollingChild() {
 
 int MakeUiThemePreview(bool chinese);
 int main(int argc,char** argv) {
+    _set_error_mode(_OUT_TO_STDERR);
     if(argc>1 && std::string(argv[1])=="--ui-preview") return MakeUiThemePreview(false);
     if(argc>1 && std::string(argv[1])=="--ui-preview-cn") return MakeUiThemePreview(true);
     if(argc>1 && std::string(argv[1])=="--language-test") return TestLanguagePanel();

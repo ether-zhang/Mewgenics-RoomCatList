@@ -7,6 +7,7 @@
 #include "cat_moves.hpp"
 #include "mew_ui_api.h"
 #include <array>
+#include <cmath>
 
 namespace roomcats {
 namespace {
@@ -15,6 +16,7 @@ using AcceptNpcFn = unsigned char (__fastcall*)(void*, int, void*);
 using OpenCatFn = void (__fastcall*)(void*, void*, unsigned char);
 using PlaceCatFn = void (__fastcall*)(void*, void*);
 using NpcClickFn = void (__fastcall*)(void*);
+using ClosePanelFn = void (__fastcall*)(void*);
 using AssignMarkerFn = void* (__fastcall*)(void*,const char*,std::size_t);
 AcceptNpcFn g_accept_npc = nullptr;
 OpenCatFn g_open_cat = nullptr;
@@ -24,6 +26,7 @@ PlaceCatFn g_place_in_pipe = nullptr;
 std::array<NpcClickFn, 7> g_npc_clicks{};
 constexpr int kDiscardDestination = 8; // Mod menu ID, not passed to the NPC progress query.
 NpcClickFn g_discard_click = nullptr;
+ClosePanelFn g_close_panel = nullptr;
 const char* DestinationLabel(int id) { return id == kDiscardDestination ? roomcats::Tx("遗弃") : roomcats::NpcLabel(id); }
 constexpr std::uintptr_t kNpcClicks[] = {0x27BC20, 0x27BEC0, 0x27B9A0, 0x27C790, 0x27C150, 0x27C320, 0x27C500};
 
@@ -136,6 +139,8 @@ bool BeginNativeDelivery(const RoomSnapshot& s, CatAction& a) noexcept {
         a.pipe = s.pipe; a.map = s.npc_drawer;
         a.pipe_generation = Value<std::uint64_t>(s.pipe - 8);
         a.map_generation = Value<std::uint64_t>(s.npc_drawer - 8);
+        a.drawer_ui = s.drawer_ui;
+        a.drawer_generation = Value<std::uint64_t>(s.drawer_ui - 8);
         // Native placement triggers pipe_down and opens the NPC drawer when
         // its animation finishes. No NPC progress or CatData writes here.
         g_place_in_pipe(reinterpret_cast<void*>(s.pipe), reinterpret_cast<void*>(a.component));
@@ -145,16 +150,70 @@ bool BeginNativeDelivery(const RoomSnapshot& s, CatAction& a) noexcept {
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+bool CloseNativeDeliveryMap(std::uintptr_t panel) noexcept {
+    __try {
+        if (!g_close_panel || !panel) return false;
+        g_close_panel(reinterpret_cast<void*>(panel));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 CatActionStatus AdvanceNativeDelivery(const RoomSnapshot& s, CatAction& a, std::string& message) {
     if (s.pipe != a.pipe || s.npc_drawer != a.map || Value<std::uint64_t>(a.pipe-8) != a.pipe_generation ||
-        Value<std::uint64_t>(a.map-8) != a.map_generation) return CatActionStatus::Failed;
+        Value<std::uint64_t>(a.map-8) != a.map_generation || s.drawer_ui != a.drawer_ui ||
+        !Member(s,s.drawer_ui,".?AVHouseDrawerUI@glaiel@@") ||
+        Value<std::uint64_t>(s.drawer_ui-8) != a.drawer_generation) return CatActionStatus::Failed;
+    if (a.phase >= 3) {
+        // Only close the empty map used by this verified delivery. A different
+        // user-opened panel is never dismissed. Native close runs its own
+        // callback and releases HouseDrawerUI's active-panel pointer.
+        if (Ptr(a.map+0x48)) {
+            message=roomcats::Tx("投送状态已变化，请查看原生界面"); return CatActionStatus::Failed;
+        }
+        if (a.phase==3) {
+            // Cat disposal arms a native 0.25s countdown at +C0. Closing
+            // the drawer before it expires clears that timer and suppresses
+            // the automatic NPC visit (NPCMapDrawer::update, 0x278695).
+            double remaining=0;
+            if (!ReadBytes(a.map+0xC0,&remaining,sizeof(remaining)) || !std::isfinite(remaining))
+                return CatActionStatus::Failed;
+            message=a.npc==kDiscardDestination ? roomcats::Tx("正在遗弃…") : std::string(roomcats::Tx("正在送至 "))+DestinationLabel(a.npc);
+            if (remaining>0) return CatActionStatus::Running;
+            if (a.npc!=kDiscardDestination && Value<unsigned char>(a.map+0x41)) {
+                // The expired timer queues QuickSwipeTransition before
+                // House becomes suspended. Wait for its callback too. It
+                // resets pipe mode via 0x279920, then enters the NPC office.
+                // On a ready House, mode 0 therefore also handles returns
+                // where no paused-scene tick reached this action driver.
+                const auto progress=Progress();
+                unsigned char visit_pending=0;
+                if (!progress || !ReadBytes(progress+0x90+a.npc*0x78,&visit_pending,sizeof(visit_pending)))
+                    return CatActionStatus::Failed;
+                if (visit_pending) return CatActionStatus::Running;
+            }
+        }
+        const auto panel=Ptr(a.map+0x38);
+        if (panel && Ptr(s.drawer_ui+0x58)==panel) {
+            message=roomcats::Tx("等待投送界面收起");
+            if (a.phase==3) {
+                a.phase=4;
+                if (!CloseNativeDeliveryMap(panel)) return CatActionStatus::Failed;
+            }
+            return CatActionStatus::Running;
+        }
+        message=a.npc==kDiscardDestination ? roomcats::Tx("已遗弃") : std::string(roomcats::Tx("已送至 "))+DestinationLabel(a.npc);
+        return CatActionStatus::Complete;
+    }
     if (a.phase == 2) {
         // Native donation callback sets the target NPC and clears its cat
         // reference only after awarding progress and removing that cat.
         if (!Ptr(a.map + 0x48) && Value<int>(a.map + 0xB8) == a.npc &&
             (!LiveCat(s, a) || !Value<unsigned char>(a.component + 0x88))) {
             message = a.npc == kDiscardDestination ? roomcats::Tx("已遗弃") : std::string(roomcats::Tx("已送至 ")) + DestinationLabel(a.npc);
-            return CatActionStatus::Complete;
+            // Disposal is not the end of the native delivery sequence.
+            // Await its countdown/office visit before cleaning up the map.
+            a.phase=3;
+            return CatActionStatus::Running;
         }
         if (Ptr(a.map + 0x48) != a.component) { message = roomcats::Tx("投送状态已变化，请查看原生界面"); return CatActionStatus::Failed; }
         return CatActionStatus::Running;
@@ -229,19 +288,23 @@ void StartNativeCatActions(std::uintptr_t image) {
     g_assign_marker = reinterpret_cast<AssignMarkerFn>(image + 0x520D0);
     g_place_in_pipe = reinterpret_cast<PlaceCatFn>(image + 0x2E88D0);
     g_discard_click = reinterpret_cast<NpcClickFn>(image + 0x27E1A0);
+    g_close_panel = reinterpret_cast<ClosePanelFn>(image + 0x2048D0);
     for (int i = 0; i < 7; ++i) g_npc_clicks[i] = reinterpret_cast<NpcClickFn>(image + kNpcClicks[i]);
     ConfigureCatActions(QueryNpcs, StepNativeAction);
 }
 void TickNativeCatActions(std::uintptr_t scene) {
     if (!HasPendingCatAction()) return;
-    if (!scene || !MewUI_IsSceneReadyForUITick(reinterpret_cast<void*>(scene))) { CancelCatAction(); return; }
-    ProcessCatAction(ReadFocusedRoom(g_action_image, CatActionNeedsCats(), true), GetTickCount64());
+    if (!scene) { CancelCatAction(); return; }
+    auto snapshot=ReadFocusedRoom(g_action_image, CatActionNeedsCats(), true);
+    if (!MewUI_IsSceneReadyForUITick(reinterpret_cast<void*>(scene)) && !snapshot.suspended) { CancelCatAction(); return; }
+    ProcessCatAction(snapshot, GetTickCount64());
 }
 void StopNativeCatActions() {
     ConfigureCatActions(nullptr, nullptr);
     g_action_image = 0; g_accept_npc = nullptr; g_open_cat = nullptr; g_place_in_pipe = nullptr;
     g_refresh_cat = nullptr; g_assign_marker = nullptr;
     g_discard_click = nullptr;
+    g_close_panel = nullptr;
     g_npc_clicks.fill(nullptr);
 }
 }

@@ -16,9 +16,12 @@ EN_EFFECTS = dict(EN_STATS, shield='Shield', divine_shield='Divine shield',
                   health_regen='Health regeneration', mana_regen='Mana regeneration', speed='Movement range')
 PARTS = [(0, 'BODY'), (1, 'HEAD'), (2, 'TAIL'), (3, 'LEG'), (4, 'ARM'),
          (6, 'EYE'), (7, 'EYEBROW'), (8, 'EAR'), (9, 'MOUTH'), (10, 'FUR')]
-# Explicit list/screening exception, keyed by the native ID rather than a
-# translated name. The installed Chinese translation calls Chungus 大块头.
-POSITIVE_DISORDERS = {'Chungus': {'zh-cn': '大块头', 'en': 'Chungus'}}
+# Explicit list/screening exceptions, keyed by native ID. Dwarfism is an
+# ordinary good mutation; only Chungus receives the quality tie-break bonus.
+POSITIVE_DISORDERS = {
+    'Chungus': {'zh-cn': '大块头', 'en': 'Chungus', 'quality': True},
+    'Dwarfism': {'quality': False},
+}
 
 
 def parse_gon(text):
@@ -161,7 +164,8 @@ def load_catalog(archive, language='zh-cn'):
                     stats = effective.get('stats', {})
                     delta = tuple(int(scalar(stats, stat, '0')) for stat in STATS)
                     disorders.append((key, title, disorder_effect(effective, translate, language), level,
-                                      delta, key in POSITIVE_DISORDERS))
+                                      delta, key in POSITIVE_DISORDERS,
+                                      POSITIVE_DISORDERS.get(key, {}).get('quality', False)))
     titles = [(part, translate('MUTATION_' + name + '_NAME'),
                translate('MUTATION_' + name + '_NAME_BAD')) for part, name in PARTS]
     if not mutations or not disorders or missing:
@@ -186,7 +190,7 @@ def generate():
     literal = lambda s: json.dumps(s, ensure_ascii=False)
     lines = ['// Generated from this installation. Do not commit or redistribute game text.', '#pragma once',
              'struct MutationDefinition { const char* category; int id; bool bad; const char* effect; const char* effect_en; int stat_delta[7]; bool quality; };',
-             'struct DisorderDefinition { const char* id; const char* name; const char* name_en; const char* effect; const char* effect_en; int level; int stat_delta[7]; bool positive_mutation; };',
+             'struct DisorderDefinition { const char* id; const char* name; const char* name_en; const char* effect; const char* effect_en; int level; int stat_delta[7]; bool positive_mutation; bool quality; };',
              'struct MutationTitle { unsigned part; const char* good; const char* bad; const char* good_en; const char* bad_en; };',
              'inline constexpr MutationDefinition kMutationDefinitions[] = {']
     for (category, ident, bad, effect, delta, quality), en in zip(mutations, english_mutations):
@@ -194,10 +198,10 @@ def generate():
                      (literal(category), ident, str(bad).lower(), literal(effect), literal(en[3]),
                       ', '.join(map(str, delta)), str(quality).lower()))
     lines += ['};', 'inline constexpr DisorderDefinition kDisorderDefinitions[] = {']
-    for (ident, name, effect, level, delta, positive), en in zip(disorders, english_disorders):
-        lines.append('    {%s, %s, %s, %s, %s, %d, {%s}, %s},' %
+    for (ident, name, effect, level, delta, positive, quality), en in zip(disorders, english_disorders):
+        lines.append('    {%s, %s, %s, %s, %s, %d, {%s}, %s, %s},' %
                      (literal(ident), literal(name), literal(en[1]), literal(effect), literal(en[2]), level,
-                      ', '.join(map(str, delta)), str(positive).lower()))
+                      ', '.join(map(str, delta)), str(positive).lower(), str(quality).lower()))
     lines += ['};', 'inline constexpr MutationTitle kMutationTitles[] = {']
     for (part, good, bad), en in zip(titles, english_titles):
         lines.append('    {%d, %s, %s, %s, %s},' % (part, literal(good), literal(bad), literal(en[1]), literal(en[2])))

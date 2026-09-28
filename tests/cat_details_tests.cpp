@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <cstdlib>
 
 namespace {
 std::array<unsigned char, 0xC58> data{};
@@ -28,6 +29,7 @@ bool FakeNative(std::uintptr_t address, roomcats::NativeCatDetails& result) {
 }
 
 int main() {
+    _set_error_mode(_OUT_TO_STDERR);
     using namespace roomcats;
     SetLanguage(Language::Chinese);
     ConfigureCatDetailsReader(FakeNative);
@@ -124,7 +126,37 @@ int main() {
         String(offset, "None"); String(other, "None");
         assert(ReadCatDetails(address, 42, 101).good.size() == 1);
     }
-    for (const auto disorder : {"Gigantism", "Gargantuan", "Gigachad", "FattyLiver", "Unknown"}) {
+    // Dwarfism is a good mutation in either slot, but not a quality mutation.
+    // Its mixed stat effects remain visible and are not applied twice.
+    for (const auto offset : {0x960, 0x988}) {
+        const auto other = offset == 0x960 ? 0x988 : 0x960;
+        String(offset, "Dwarfism"); Put(offset + 32, std::int64_t(1));
+        String(other, "None");
+        const auto raw = data;
+        const auto positive = ReadCatDetails(address, 42, 101);
+        assert(positive.valid && positive.good.size() == 2 && positive.bad.size() == 1 && positive.diseases.empty());
+        const auto& dwarf = positive.good.back();
+        assert(dwarf.name == "侏儒症" && dwarf.name_en == "Dwarfism" && !dwarf.quality);
+        assert(dwarf.effect.find("闪避几率+10%") != std::string::npos);
+        assert(dwarf.effect_en.find("+10% dodge chance.") != std::string::npos);
+        assert(dwarf.stat_delta == (Stats{-2, 2, -2, 0, 2, 0, 2}));
+        assert(MutationStatImpact(positive) == (Stats{-2, 2, -1, 0, 2, 0, 2}));
+        assert(positive.real == d.real && positive.genetic == d.genetic && data == raw);
+        assert(ReadCatDetails(address, 42, 101).revision == positive.revision);
+        String(other, "Rabies");
+        const auto sick = ReadCatDetails(address, 42, 101);
+        assert(sick.good.size() == 2 && sick.bad.size() == 1 && sick.diseases.size() == 1);
+        assert(sick.diseases[0].name == "狂犬病" && sick.revision != positive.revision);
+        String(other, "Chungus");
+        const auto both = ReadCatDetails(address, 42, 101);
+        assert(both.good.size() == 3 && both.diseases.empty());
+        assert(MutationStatImpact(both) == (Stats{-2, 2, 3, 0, 2, 0, 2}));
+        String(offset, "None"); String(other, "None");
+        assert(ReadCatDetails(address, 42, 101).good.size() == 1);
+    }
+    bool positive_mutation = true;
+    assert(!LookupDisorder("Unknown", 1, &positive_mutation).quality && !positive_mutation);
+    for (const auto disorder : {"PrimordialDwarf", "Gigantism", "Gargantuan", "Gigachad", "FattyLiver", "Unknown"}) {
         String(0x960, disorder);
         const auto ordinary = ReadCatDetails(address, 42, 101);
         assert(ordinary.good.size() == 1 && ordinary.diseases.size() == 1 && !ordinary.diseases[0].quality);

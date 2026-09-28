@@ -101,6 +101,16 @@ int TestNewbornPlan() {
     s.cats[0].details.diseases.clear(); s.cats[0].details.bad.push_back({"Bad",""});
     p=PlanNewbornCats(s,17);
     CHECK_NEWBORN(Room(Decision(p,1))==4 && Decision(p,1).discard);
+    // Ordinary-good Dwarfism avoids the health rule but does not outrank a
+    // quality mutation or a class when genetics and attic DEX are equal.
+    s=House(); s.cats={MakeCat(1,0,48,51),MakeCat(2,0,48,56,1,1),MakeCat(3,0,48)};
+    s.cats[0].details.good.push_back(LookupDisorder("Dwarfism")); s.cats[2].details.collar="Mage";
+    CHECK_NEWBORN(QualityMutations(s.cats[0].details)==0 && !BreedingHealthRisk(s.cats[0]));
+    p=PlanNewbornCats(s,17); CHECK_NEWBORN(p.Valid());
+    CHECK_NEWBORN(Room(Decision(p,1))>0 && Room(Decision(p,1))<4 && !Decision(p,1).discard);
+    CHECK_NEWBORN(Room(Decision(p,2))==0 && Room(Decision(p,3))==0);
+    s.cats[0].details.diseases.push_back(LookupDisorder("Rabies")); p=PlanNewbornCats(s,17);
+    CHECK_NEWBORN(Room(Decision(p,1))==4 && Decision(p,1).discard);
     std::cout << "Newborn planner passed: thresholds, DEX priority, tier quotas, quality/class ties, seeded ties, promotions, sibling deduplication, adult preservation, combat culls, Chungus exception and stale-plan rejection.\n";
     return 0;
 }

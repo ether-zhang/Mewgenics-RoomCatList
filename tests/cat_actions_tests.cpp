@@ -1,10 +1,12 @@
 #include "../src/cat_actions.hpp"
 #include <cassert>
 #include <iostream>
+#include <cstdlib>
 
 namespace {
 int queries = 0, starts = 0, advances = 0;
 bool accepted = true, finish = false, cancel_during_step = false;
+bool verify_after_gap = false;
 std::vector<roomcats::NpcChoice> Query(const roomcats::RoomSnapshot&, const roomcats::Cat&) {
     ++queries;
     return {{0, "Unlocked", accepted, ""}, {1, "Unavailable", false, "Reason"}};
@@ -17,12 +19,16 @@ roomcats::CatActionStatus Step(const roomcats::RoomSnapshot&, roomcats::CatActio
         if (action.kind == CatActionKind::Inspect) { message = "Opened"; return CatActionStatus::Complete; }
         if (!accepted) return CatActionStatus::Failed;
         action.phase = 1; message = "Waiting";
-    } else ++advances;
+    } else {
+        ++advances;
+        if(verify_after_gap && action.phase<3) ++action.phase;
+    }
     return finish ? CatActionStatus::Complete : CatActionStatus::Running;
 }
 }
 
 int main() {
+    _set_error_mode(_OUT_TO_STDERR);
     using namespace roomcats;
     ConfigureCatActions(Query, Step);
     RoomSnapshot snapshot;
@@ -85,6 +91,43 @@ int main() {
     TakeCatActionResult(result);
     CancelCatAction();
     assert(TakeCatActionResult(result) && !result.success);
+    // NPC animation suspends the same House, sometimes for longer than the
+    // action timeout. No native callback runs until House is active again.
+    snapshot.game_day=42; snapshot.cat_database=1234;
+    assert(QueueCatAction(snapshot,42,CatActionKind::Donate,0));
+    ProcessCatAction(snapshot,50000); TakeCatActionResult(result);
+    const auto steps_before_pause=advances;
+    auto paused=snapshot; paused.suspended=true; paused.valid=paused.in_house=false; paused.cats.clear();
+    ProcessCatAction(paused,100000); ProcessCatAction(paused,150000);
+    assert(HasPendingCatAction() && advances==steps_before_pause && !TakeCatActionResult(result));
+    auto returned=snapshot; returned.cats.clear();
+    ProcessCatAction(returned,150100);
+    assert(HasPendingCatAction() && advances==steps_before_pause+1);
+    finish=true; ProcessCatAction(returned,150200);
+    assert(TakeCatActionResult(result) && result.completed && result.success && !HasPendingCatAction());
+    finish=false;
+    for(int changed=0;changed<3;++changed) {
+        assert(QueueCatAction(snapshot,42,CatActionKind::Donate,0));
+        ProcessCatAction(snapshot,200000); TakeCatActionResult(result);
+        auto other=paused;
+        if(changed==0) ++other.game_day;
+        if(changed==1) ++other.cat_database;
+        if(changed==2) ++other.generation;
+        ProcessCatAction(other,200100);
+        assert(TakeCatActionResult(result) && !result.success && !HasPendingCatAction());
+    }
+    // No tick at all during a long native transition: verify a dispatched
+    // donation first, without replaying the original click.
+    verify_after_gap=true;
+    assert(QueueCatAction(snapshot,42,CatActionKind::Donate,0));
+    ProcessCatAction(snapshot,300000); TakeCatActionResult(result);
+    ProcessCatAction(returned,300100); // Simulated dispatch -> phase 2.
+    const auto starts_before_gap=starts;
+    ProcessCatAction(returned,400000); // Verified completion -> cleanup phase 3.
+    assert(HasPendingCatAction() && starts==starts_before_gap && !TakeCatActionResult(result));
+    finish=true; ProcessCatAction(returned,400100);
+    assert(TakeCatActionResult(result) && result.completed && result.success);
+    finish=false; verify_after_gap=false;
     ConfigureCatActions(nullptr, nullptr);
     std::cout << "Cat actions passed: read-only previews, disabled/locked choices, one dispatch, native handoff waits, stale identities, eligibility changes, timeout and cancellation.\n";
 }

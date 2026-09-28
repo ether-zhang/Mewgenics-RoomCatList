@@ -48,6 +48,6 @@ Stats MutationStatImpact(const CatDetails& details);
 std::string FormatSignedStat(std::int64_t value);
 std::string FormatSexOrientation(const CatDetails& details);
 const char* InbreedingLabel(double coefficient);
-Trait LookupDisorder(const std::string& id, std::int64_t level = 1);
+Trait LookupDisorder(const std::string& id, std::int64_t level = 1, bool* positive_mutation = nullptr);
 bool LookupMutation(std::uint64_t key, Trait& trait, bool& bad);
 }
