@@ -44,38 +44,54 @@ void OpenScreeningSettings() {
 }
 void DrawScreeningSettings() {
     const auto display=ImGui::GetIO().DisplaySize;
-    ImGui::SetNextWindowSize({std::min(780.0f,display.x-40),std::min(740.0f,display.y-60)},ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize({std::min(960.0f,display.x-40),std::min(820.0f,display.y-60)},ImGuiCond_Appearing);
     ImGui::SetNextWindowPos({display.x*.5f,display.y*.5f},ImGuiCond_Appearing,{.5f,.5f});
     if(!ImGui::BeginPopupModal(roomcats::Tx("筛选设置###ScreeningSettings"),nullptr,ImGuiWindowFlags_NoSavedSettings)) return;
+    ApplyListFontScale();
     roomcats::ui::WindowPaper(false,false,roomcats::Tx("筛选设置"));
     g_rules_popup_drawn=true; g_mouse.SetPopupOpen(true); ClearTraitHover();
-    ImGui::TextWrapped(roomcats::Tx("排序：属性 > 优质变异 > 有无职业。房子标记始终保护；小猫年龄=1，老猫年龄>1。"));
-    ImGui::TextWrapped(roomcats::Tx("修改只影响新生成的方案；保存后仍须复查并确认。数值可直接输入，也可点击加减按钮。"));
+    ImGui::TextWrapped(roomcats::Tx("繁育比较遗传总属性，战备比较真实总属性；相同时先比优质突变数量，再看是否有职业。"));
+    ImGui::TextWrapped(roomcats::Tx("设置保存后会重新生成受影响的方案；复查并点击“确定处理”后才会执行。"));
+    if(ImGui::CollapsingHeader(roomcats::Tx("术语说明"))) {
+        ImGui::TextWrapped("%s",roomcats::Tx("遗传总属性是七项遗传数值的总和；真实总属性是七项当前实际数值的总和。"));
+        ImGui::TextWrapped("%s",roomcats::Tx("优质突变：只增加属性的好突变，或带功能性效果的好突变。纯数值突变若有减属性，就不计为优质。大块头算优质，侏儒症只算普通好突变。"));
+        ImGui::TextWrapped("%s",roomcats::Tx("战备房是一楼右；其他四个房间用于繁育。待处理名单中的猫可以送至NPC、遗弃或保留，确认前不会执行。"));
+    }
     if(ImGui::BeginTabBar("RuleGroups")) {
         auto fields=[](auto visit) {
             ImGui::BeginChild("RuleFields",{0,ImGui::GetContentRegionAvail().y-ImGui::GetFrameHeightWithSpacing()*3},ImGuiChildFlags_Borders);
             if(g_pad_frame.scroll_y!=0) ImGui::SetScrollY(ImGui::GetScrollY()+g_pad_frame.scroll_y*650*ImGui::GetIO().DeltaTime);
             visit([](const char* key,const char* label,auto& value,int lo,int hi) {
                 ImGui::PushID(key);
+                bool hovered=false;
                 if constexpr(std::is_same_v<std::decay_t<decltype(value)>,bool>) roomcats::ui::Checkbox(label,&value);
                 else {
-                    ImGui::TextUnformatted(label); ImGui::SameLine(std::max(ImGui::GetCursorPosX(),ImGui::GetContentRegionAvail().x-215));
-                    ImGui::SetNextItemWidth(205); roomcats::ui::InputInt("##Value",&value,1,5);
-                    if(ImGui::IsItemHovered()) ImGui::SetTooltip(roomcats::Tx("可填范围：%d 至 %d"),lo,hi);
+                    const float input_width=205*ListFontScale();
+                    const float input_x=ImGui::GetCursorPosX()+ImGui::GetContentRegionAvail().x-input_width;
+                    ImGui::PushTextWrapPos(input_x-ImGui::GetStyle().ItemSpacing.x);
+                    ImGui::TextUnformatted(label); hovered=ImGui::IsItemHovered();
+                    ImGui::PopTextWrapPos(); ImGui::SameLine(input_x);
+                    ImGui::SetNextItemWidth(input_width); roomcats::ui::InputInt("##Value",&value,1,5);
+                }
+                if(hovered || ImGui::IsItemHovered()) {
+                    ImGui::BeginTooltip(); ImGui::PushTextWrapPos(600);
+                    ImGui::TextUnformatted(roomcats::ScreeningRuleHelp(key));
+                    if constexpr(!std::is_same_v<std::decay_t<decltype(value)>,bool>) ImGui::Text(roomcats::Tx("可填范围：%d 至 %d"),lo,hi);
+                    ImGui::PopTextWrapPos(); ImGui::EndTooltip();
                 }
                 ImGui::PopID();
             });
             ImGui::EndChild();
         };
         if(ImGui::BeginTabItem(roomcats::Tx("新生猫"))) { fields([](auto f) { roomcats::VisitNewbornRules(g_rules_draft.newborn,f); }); ImGui::EndTabItem(); }
-        if(ImGui::BeginTabItem(roomcats::Tx("老猫"))) { fields([](auto f) { roomcats::VisitAdultRules(g_rules_draft.adult,f); }); ImGui::EndTabItem(); }
+        if(ImGui::BeginTabItem(roomcats::Tx("大猫"))) { fields([](auto f) { roomcats::VisitAdultRules(g_rules_draft.adult,f); }); ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
     const auto error=roomcats::ValidateScreeningRules(g_rules_draft);
     if(!error.empty()) ImGui::TextColored(roomcats::ui::Warning(),"%s",error.c_str());
     else {
         ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextWrapped("%s",roomcats::Tx("二楼新生每房最多可设6只；对面出生数量需小于等于每房上限。"));
+        ImGui::TextWrapped("%s",roomcats::Tx("房子图标的猫始终保留。新生猫指年龄为1的猫；大猫指年龄大于1的猫。"));
         ImGui::PopStyleColor();
     }
     if(roomcats::ui::Button(roomcats::Tx("恢复默认"))) g_rules_draft={};

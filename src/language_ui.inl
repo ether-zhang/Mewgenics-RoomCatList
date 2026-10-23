@@ -55,8 +55,12 @@ void SwitchUiLanguage(roomcats::Language language) {
     g_language_save_requested=true;
 }
 
+float LanguageSelectorWidth() {
+    const auto label=roomcats::Chinese() ? "简体中文" : "English";
+    return std::max(118*ListFontScale(),ImGui::CalcTextSize(label).x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetFrameHeight());
+}
 void DrawLanguageSelector() {
-    ImGui::SetNextItemWidth(118);
+    ImGui::SetNextItemWidth(LanguageSelectorWidth());
     if (roomcats::ui::BeginCombo("##RoomCatLanguage",roomcats::Chinese() ? "简体中文" : "English")) {
         g_language_popup_drawn=true;
         g_mouse.SetPopupOpen(true);

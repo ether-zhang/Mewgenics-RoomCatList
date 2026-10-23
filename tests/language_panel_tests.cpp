@@ -25,12 +25,14 @@ void Click() {
 int TestLanguagePanel() {
     _set_error_mode(_OUT_TO_STDERR);
     using namespace roomcats;
-    SetLanguage(Language::English);
+    SetLanguage(Language::Chinese);
     ImGui::CreateContext(); ui::Apply(false);
     auto& io=ImGui::GetIO(); io.IniFilename=io.LogFilename=nullptr;
     io.DisplaySize={1600,1000}; io.DeltaTime=1.0f/60;
     unsigned char* pixels; int w,h; io.Fonts->GetTexDataAsRGBA32(&pixels,&w,&h);
     RegisterLanguageSettings();
+    ImGui::LoadIniSettingsFromMemory("\n");
+    assert(!Chinese()); // No saved language always starts in English.
     auto house=newborn_test::House(); house.cats={newborn_test::MakeCat(1,0,44,51)};
     g_snapshot=house; g_open=g_has_house=true;
     Frame(3);
@@ -44,7 +46,7 @@ int TestLanguagePanel() {
     const float item=style.FramePadding.x*2;
     const float settings=ImGui::CalcTextSize(Tx("筛选设置")).x+item+style.ItemSpacing.x;
     const float actions=ImGui::CalcTextSize(Tx("新生猫筛选")).x+item+
-        ImGui::CalcTextSize(Tx("老猫数量控制")).x+item+style.ItemSpacing.x;
+        ImGui::CalcTextSize(Tx("大猫数量控制")).x+item+style.ItemSpacing.x;
     const float combo_left=panel->ContentRegionRect.Max.x-
         (118+style.ItemSpacing.x+settings+actions);
     Point(combo_left+50,panel->WorkRect.Min.y+ImGui::GetFrameHeight()*.5f);
@@ -61,7 +63,7 @@ int TestLanguagePanel() {
     assert(saved.find("[RoomCatLanguage][Selection]")!=std::string::npos && saved.find("code=zh-cn")!=std::string::npos);
     const float chinese_settings=ImGui::CalcTextSize(Tx("筛选设置")).x+item+style.ItemSpacing.x;
     const float chinese_actions=ImGui::CalcTextSize(Tx("新生猫筛选")).x+item+
-        ImGui::CalcTextSize(Tx("老猫数量控制")).x+item+style.ItemSpacing.x;
+        ImGui::CalcTextSize(Tx("大猫数量控制")).x+item+style.ItemSpacing.x;
     const float chinese_left=panel->ContentRegionRect.Max.x-
         (118+style.ItemSpacing.x+chinese_settings+chinese_actions);
     Point(chinese_left+50,panel->WorkRect.Min.y+ImGui::GetFrameHeight()*.5f);

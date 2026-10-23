@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <cstdlib>
 
 struct TestString { unsigned char storage[16]{}; std::uint64_t size=0, capacity=0; };
 void TestRoomScopes();
@@ -13,6 +14,7 @@ void TestFamilyReader();
 void TestComfortReader();
 
 int main() {
+    _set_error_mode(_OUT_TO_STDERR);
     roomcats::SetLanguage(roomcats::Language::Chinese);
     std::string result;
     TestString small;
@@ -75,6 +77,8 @@ int main() {
     auto snapshot = roomcats::ReadFocusedRoom(0, true);
     assert(!snapshot.in_house && snapshot.cats.empty());
     TestRoomScopes();
+    extern void TestLargeHouse();
+    TestLargeHouse();
     TestNativeArgs();
     TestFamilyReader();
     TestComfortReader();

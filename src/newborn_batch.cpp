@@ -152,7 +152,7 @@ void TickNewbornBatch(const RoomSnapshot& fresh,std::uint64_t now) {
             for(auto& cat:expected.cats) if(const auto* actual=Find(fresh,cat.id)) cat.parents=actual->parents;
         if(status.completed==commands.size()) {
             status.running=false; status.finished=true;
-            status.message=status.kind==ScreeningKind::Adult ? roomcats::Tx("老猫数量控制处理完成") : roomcats::Tx("新生猫筛选处理完成");
+            status.message=status.kind==ScreeningKind::Adult ? roomcats::Tx("大猫数量控制处理完成") : roomcats::Tx("新生猫筛选处理完成");
             status.post_fingerprint=ScreeningFingerprint(fresh,status.kind); return;
         }
         if(stop_requested) { Fail(roomcats::Tx("已停止处理")); return; }

@@ -21,6 +21,7 @@ void ApplyRoomSnapshot(roomcats::RoomSnapshot next, bool force, double read_ms) 
                     a.parents.ids == b.parents.ids && a.parents.names == b.parents.names;
             });
     g_sort_dirty |= !same_contents;
+    if(!same_contents || view_changed) g_npc_previews.clear();
     g_font_scan_pending |= !same_contents || next.room_id != g_snapshot.room_id || next.error != g_snapshot.error;
     g_snapshot = std::move(next);
     g_has_house = g_snapshot.in_house;
@@ -48,12 +49,13 @@ void ClearTraitHover() {
 }
 
 void ClearMovePopup() {
-    if ((g_move_popup_cat || g_rules_popup_drawn || g_language_popup_drawn) && ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+    if ((g_move_popup_cat || g_rules_popup_drawn || g_language_popup_drawn || g_display_popup_drawn) && ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
         ImGui::ClosePopupToLevel(0, true);
     g_move_popup_cat = 0;
     g_move_popup_drawn = g_close_move_popup = false;
     g_rules_popup_drawn=false;
     g_language_popup_drawn=false;
+    g_display_popup_drawn=false;
     g_mouse.SetPopupOpen(false);
 }
 
@@ -64,6 +66,7 @@ bool RequestListBack() {
 }
 
 void ResetListViews() {
+    g_npc_previews.clear();
     if (!g_view_history.empty()) g_sort = g_view_history.front().sort;
     g_view = {}; g_view_history.clear(); g_pending_parent_view.reset();
     g_pending_view_back = g_view_refresh_requested = g_restore_view_scroll = false;
@@ -157,13 +160,13 @@ void DrawCatName(const roomcats::Cat& cat) {
     ImGui::BeginDisabled(cat.record_only || roomcats::NewbornBatchActive() || (InScreeningReview() && g_screening_submitted) || roomcats::HasPendingCatMove() || roomcats::HasPendingCatAction());
     if (ImGui::Selectable("##InspectCat", false, 0, {width, ImGui::GetTextLineHeight()*2 + ImGui::GetStyle().ItemSpacing.y}))
         roomcats::QueueCatAction(g_snapshot, cat.id, roomcats::CatActionKind::Inspect);
-    const float icon_width = cat.details.valid ? 28.0f : 0.0f;
+    const float icon_width = cat.details.valid ? 28.0f*ListFontScale() : 0.0f;
     ImGui::RenderTextClipped(position, {position.x+width-icon_width, position.y+ImGui::GetTextLineHeight()+3},
         name.data(), name.data()+name.size(), nullptr);
     if (cat.details.valid) {
         const auto icon = roomcats::ClassGlyph(cat.details.collar);
         ImGui::RenderTextClipped({position.x+width-icon_width,position.y},
-            {position.x+width,position.y+28},icon.c_str(),nullptr,nullptr);
+            {position.x+width,position.y+28*ListFontScale()},icon.c_str(),nullptr,nullptr);
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip(roomcats::Tx("%s\n职业：%s\n%s"), cat.name.c_str(),
         cat.details.valid ? roomcats::ClassLabel(cat.details.collar).c_str() : roomcats::Tx("未知"),
@@ -283,19 +286,20 @@ void DrawTraitHover() {
     if (found == g_snapshot.cats.end() || !found->details.valid) { ClearTraitHover(); return; }
     const auto display = ImGui::GetIO().DisplaySize;
     const bool mutation = g_trait_hover.group < 2;
-    const float summary_width = 180.0f;
-    const float width = std::min(mutation ? 760.0f : 540.0f, display.x - 32.0f);
+    const float summary_width = 180.0f*ListFontScale();
+    const float width = std::min((mutation ? 760.0f : 540.0f)*ListFontScale(), display.x - 32.0f);
     const auto& traits = Traits(*found, g_trait_hover.group);
     const auto& style = ImGui::GetStyle();
     const float wrap = width - style.WindowPadding.x * 2 - style.ScrollbarSize -
         (mutation ? summary_width + style.ItemSpacing.x : 0);
-    float content_height = style.WindowPadding.y * 2 + ImGui::GetTextLineHeight() + style.ItemSpacing.y * 2 + 4;
+    const float font_size=ImGui::GetFont()->FontSize*ImGui::GetIO().FontGlobalScale*ListFontScale();
+    float content_height = style.WindowPadding.y * 2 + font_size + style.ItemSpacing.y * 2 + 4;
     for (const auto& trait : traits)
-        content_height += ImGui::CalcTextSize(roomcats::TraitName(trait).c_str(), nullptr, false, wrap).y +
-            ImGui::CalcTextSize(roomcats::TraitEffect(trait).c_str(), nullptr, false, wrap).y + style.ItemSpacing.y * 4 + 2;
-    if (traits.empty()) content_height += ImGui::GetTextLineHeightWithSpacing();
+        content_height += ImGui::GetFont()->CalcTextSizeA(font_size,FLT_MAX,wrap,roomcats::TraitName(trait).c_str()).y +
+            ImGui::GetFont()->CalcTextSizeA(font_size,FLT_MAX,wrap,roomcats::TraitEffect(trait).c_str()).y + style.ItemSpacing.y * 4 + 2;
+    if (traits.empty()) content_height += font_size+style.ItemSpacing.y;
     if (mutation) content_height = std::max(content_height,
-        style.WindowPadding.y * 2 + ImGui::GetTextLineHeightWithSpacing() * 15);
+        style.WindowPadding.y * 2 + (font_size+style.ItemSpacing.y) * 15);
     // Place above/below the source row. A sideways popup could cover all the
     // other trait cells, making it impossible to move between their targets.
     const float below = std::max(1.0f, display.y - g_trait_hover.source_max.y - 20);
@@ -314,6 +318,7 @@ void DrawTraitHover() {
             ImGuiWindowFlags_Tooltip | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
             (mutation ? ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse : 0))) {
+        ApplyListFontScale();
         // Tooltip draw layers alone do not reorder ImGui's mouse hit testing.
         roomcats::ui::WindowPaper(false,true);
         // Keep this interactive tooltip above the main window for both paths,
@@ -348,6 +353,7 @@ void DrawTraitHover() {
     ImGui::End();
 }
 
+#include "display_settings.inl"
 #include "language_ui.inl"
 #include "screening_settings_ui.inl"
 #include "screening_ui.inl"
@@ -376,7 +382,7 @@ void DrawColumnHeaders() {
         std::string title = roomcats::Tx(kCatColumnLabels[col]);
         if (selected) title += g_sort.Ascending() ? "↑" : "↓";
         ImGui::RenderTextClipped(position, {position.x+width, position.y+line_height}, title.data(), title.data()+title.size(), nullptr);
-        if (col == Age) {
+        if (!StatCatColumn(col)) {
             const ImVec2 lower{position.x, position.y+line_height+2};
             ImGui::RenderTextClipped(lower, {lower.x+width, lower.y+line_height}, roomcats::Tx("排序"), nullptr, nullptr);
         } else {
@@ -393,7 +399,7 @@ void DrawColumnHeaders() {
             }
         }
         if (g_mouse.CapturesPointer() && ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", col == Age ? roomcats::Tx("年龄在降序和升序之间切换。") : roomcats::Tx("点击表头依次切换：真实降序、真实升序、遗传降序、遗传升序。"));
+            ImGui::SetTooltip("%s", col == Age ? roomcats::Tx("年龄在降序和升序之间切换。") : StatCatColumn(col) ? roomcats::Tx("点击表头依次切换：真实降序、真实升序、遗传降序、遗传升序。") : roomcats::Tx("点击切换升序或降序；突变和疾病按数量排序，性别按公、母、无排序。"));
         ImGui::PopID();
     }
 }
@@ -405,6 +411,7 @@ void DrawUi() {
     if (g_close_move_popup) ClearMovePopup();
     g_rules_popup_drawn=false;
     g_language_popup_drawn=false;
+    g_display_popup_drawn=false;
     if (g_move_popup_cat && std::none_of(g_snapshot.cats.begin(), g_snapshot.cats.end(),
         [](const roomcats::Cat& c) { return c.id == g_move_popup_cat; })) ClearMovePopup();
     g_move_popup_drawn = false;
@@ -417,8 +424,20 @@ void DrawUi() {
     const float width = std::min(1420.0f, io.DisplaySize.x - 64.0f);
     ImGui::SetNextWindowSize({width, height}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_FirstUseEver, {0.5f, 0.5f});
-    ImGui::SetNextWindowSizeConstraints({620, 350}, {std::max(620.0f, io.DisplaySize.x - 32), std::max(350.0f, io.DisplaySize.y - 32)});
+    const ImVec2 max_size{std::max(1.0f,io.DisplaySize.x-32),std::max(1.0f,io.DisplaySize.y-32)};
+    const ImVec2 min_size{std::min(620*ListFontScale(),max_size.x),std::min(350*ListFontScale(),max_size.y)};
+    ImGui::SetNextWindowSizeConstraints(min_size,max_size);
+    if(g_resize_for_font) {
+        if(const auto* panel=ImGui::FindWindowByName("猫咪列表###RoomCatsPanel")) {
+            const ImVec2 size{std::clamp(panel->SizeFull.x,min_size.x,max_size.x),std::clamp(panel->SizeFull.y,min_size.y,max_size.y)};
+            ImGui::SetNextWindowSize(size);
+            ImGui::SetNextWindowPos({std::clamp(panel->Pos.x,16.0f,std::max(16.0f,io.DisplaySize.x-size.x-16)),
+                std::clamp(panel->Pos.y,16.0f,std::max(16.0f,io.DisplaySize.y-size.y-16))});
+        }
+        g_resize_for_font=false;
+    }
     if (ImGui::Begin(roomcats::Tx("猫咪列表###RoomCatsPanel"), &g_open, ImGuiWindowFlags_NoCollapse)) {
+        ApplyListFontScale();
         roomcats::ui::WindowPaper(true,false,roomcats::Tx("猫咪列表"));
         const auto position = ImGui::GetWindowPos();
         const auto size = ImGui::GetWindowSize();
@@ -432,20 +451,22 @@ void DrawUi() {
         if (!g_snapshot.valid) {
             ImGui::TextWrapped("%s", g_snapshot.error.empty() ? roomcats::Tx("房间数据暂时不可用，请稍后重试。") : g_snapshot.error.c_str());
         } else {
-            const auto label = g_view.screening ? std::string(g_screening_plan && g_screening_plan->kind==roomcats::ScreeningKind::Adult ? roomcats::Tx("老猫数量控制复查") : roomcats::Tx("新生猫筛选复查")) : g_view.IsParents() ? g_view.child_name+roomcats::Tx(" 的父母") : roomcats::RoomLabel(g_snapshot.room_id);
+            const auto label = g_view.screening ? std::string(g_screening_plan && g_screening_plan->kind==roomcats::ScreeningKind::Adult ? roomcats::Tx("大猫数量控制复查") : roomcats::Tx("新生猫筛选复查")) : g_view.IsParents() ? g_view.child_name+roomcats::Tx(" 的父母") : roomcats::RoomLabel(g_snapshot.room_id);
             ImGui::TextUnformatted(label.c_str());
             ImGui::SameLine();
             ImGui::TextDisabled(roomcats::Tx("  %zu 只猫咪"), g_snapshot.cats.size());
             DrawScreeningToolbar();
             ImGui::Separator();
+            std::string table_id=g_view.screening ? "RoomCatsScreeningRowsV1" : "RoomCatsDetailsRowsV6";
+            if(g_font_percent!=100) table_id+="Font"+std::to_string(g_font_percent);
             if (g_snapshot.cats.empty()) {
                 if(g_view.screening) DrawEmptyScreeningReview();
                 else ImGui::TextDisabled("%s", g_snapshot.room ? roomcats::Tx("此房间暂无猫咪。") : roomcats::Tx("家园暂无猫咪。"));
             }
-            else if (ImGui::BeginTable(g_view.screening ? "RoomCatsScreeningRowsV1" : "RoomCatsDetailsRowsV6", CatColumnCount+(g_view.screening ? 2 : 0),
+            else if (ImGui::BeginTable(table_id.c_str(), CatColumnCount+(g_view.screening ? 2 : 0),
                     ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
                     ImGuiTableFlags_ScrollX | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingFixedFit,
-                    {0, ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing() * ((g_move_feedback.empty() ? 2 : 3) + (g_pad_frame.connected ? 1 : 0) + (g_view.screening ? (g_screening_plan && g_screening_plan->kind==roomcats::ScreeningKind::Adult ? 4 : 3) : 0))})) {
+                    {0, ImGui::GetContentRegionAvail().y - ListFooterHeight() - ImGui::GetTextLineHeightWithSpacing() * ((g_move_feedback.empty() ? 0 : 1) + (g_pad_frame.connected ? 1 : 0) + (g_view.screening ? (g_screening_plan && g_screening_plan->kind==roomcats::ScreeningKind::Adult ? 4 : 3) : 0))})) {
                 if (g_restore_view_scroll) {
                     ImGui::SetScrollX(g_view.scroll.x); ImGui::SetScrollY(g_view.scroll.y);
                     g_restore_view_scroll = false; g_reset_list_scroll = false;
@@ -456,19 +477,25 @@ void DrawUi() {
                 ImGui::TableSetupScrollFreeze(g_view.screening ? 2 : 3, 1);
                 DrawColumnHeaders();
                 if (g_sort_dirty || g_sorted_rows.size() != g_snapshot.cats.size()) {
-                    g_sorted_rows = roomcats::SortCatRows(g_snapshot.cats, g_sort);
-                    g_sort_dirty = false;
+                    RebuildTableRows();
                 }
-                ImGuiListClipper clipper;
-                clipper.Begin(static_cast<int>(g_snapshot.cats.size()));
-                if (g_move_popup_cat)
-                    for (int row = 0; row < static_cast<int>(g_sorted_rows.size()); ++row)
-                        if (g_snapshot.cats[g_sorted_rows[row]].id == g_move_popup_cat) { clipper.IncludeItemByIndex(row); break; }
                 const float row_height = ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y + ImGui::GetStyle().CellPadding.y * 2;
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(g_table_rows.size()),row_height);
+                if (g_move_popup_cat)
+                    for (int row = 0; row < static_cast<int>(g_table_rows.size()); ++row)
+                        if (g_table_rows[row].cat>=0 && g_snapshot.cats[g_table_rows[row].cat].id == g_move_popup_cat) { clipper.IncludeItemByIndex(row); break; }
                 while (clipper.Step()) {
                     for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-                        const auto& cat = g_snapshot.cats[g_sorted_rows[i]];
                         ImGui::TableNextRow(0, row_height);
+                        const auto& row=g_table_rows[i];
+                        if(row.cat<0) {
+                            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,ImGui::GetColorU32(ImGuiCol_TableHeaderBg));
+                            ImGui::TableSetColumnIndex(TableColumnIndex(Name));
+                            ImGui::Text("%s · %d",row.label.c_str(),row.count);
+                            continue;
+                        }
+                        const auto& cat = g_snapshot.cats[row.cat];
                         if(g_view.screening && ImGui::TableSetColumnIndex(0)) DrawScreeningChoice(cat);
                         ImGui::TableSetColumnIndex(TableColumnIndex(Position));
                         DrawMoveSelector(cat);
@@ -514,15 +541,13 @@ void DrawUi() {
         ImGui::Spacing();
         if(g_view.screening) DrawScreeningSummary();
         if (!g_move_feedback.empty()) ImGui::TextUnformatted(g_move_feedback.c_str());
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextWrapped(roomcats::Tx("滚轮上下 · Shift+滚轮左右 · 点击表头排序 · %s"),g_view.IsParents() || g_view.screening ? roomcats::Tx("Esc 返回上一级") : roomcats::Tx("Esc 关闭"));
-        ImGui::PopStyleColor();
+        DrawListFooter();
         if (g_pad_frame.connected) ImGui::TextDisabled(roomcats::Tx("手柄：左摇杆移动光标 · A 点击 · B 返回 · 右摇杆滚动"));
     }
     DrawScreeningSettings();
     ImGui::End();
     if (g_move_popup_cat && !g_move_popup_drawn) ClearMovePopup();
-    const bool popup_open = (g_move_popup_drawn || g_rules_popup_drawn || g_language_popup_drawn) && ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    const bool popup_open = (g_move_popup_drawn || g_rules_popup_drawn || g_language_popup_drawn || g_display_popup_drawn) && ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     g_mouse.SetPopupOpen(popup_open);
     if (!popup_open) g_move_popup_cat = 0;
     DrawTraitHover();

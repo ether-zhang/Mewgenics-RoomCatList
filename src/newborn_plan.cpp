@@ -144,7 +144,7 @@ NewbornPlan PlanNewbornCats(const RoomSnapshot& s,std::uint64_t seed,NewbornRule
                     if(origin[ia]<4 && origin[ia]==origin[ib] && destination[ia]==destination[ib]) {
                         if(ProtectedCat(p.decisions[ia].cat) && ProtectedCat(p.decisions[ib].cat)) {
                             p.notes.push_back(c.name+roomcats::Tx(" 的双亲均有房子标记，保留亲本位置"));
-                            move(i,4,roomcats::Tx("近亲小猫转备战")); continue;
+                            move(i,4,roomcats::Tx("近亲小猫转战备")); continue;
                         }
                         const auto weak=ProtectedCat(p.decisions[ia].cat) ? ib : ProtectedCat(p.decisions[ib].cat) ? ia : Ranked{p,false}(ia,ib) ? ib : ia;
                         if(!parent_demoted[weak] && (origin[weak]!=3 || rules.demote_lowest_parent)) {
@@ -155,11 +155,11 @@ NewbornPlan PlanNewbornCats(const RoomSnapshot& s,std::uint64_t seed,NewbornRule
                 } else p.notes.push_back(c.name+roomcats::Tx(" 的父母已不同时在繁育房，无需重复拆分"));
             }
         }
-        move(i,4,roomcats::Tx("近亲小猫转备战"));
+        move(i,4,roomcats::Tx("近亲小猫转战备"));
     }
     for(std::size_t i=0;i<p.decisions.size();++i) {
         const auto& c=p.decisions[i].cat;
-        if(origin[i]<4 && Newborn(c) && !ProtectedCat(c) && BreedingHealthRisk(c,rules.breeding)) move(i,4,roomcats::Tx("有坏变异或疾病，转备战筛选"));
+        if(origin[i]<4 && Newborn(c) && !ProtectedCat(c) && BreedingHealthRisk(c,rules.breeding)) move(i,4,roomcats::Tx("有坏突变或疾病，转战备筛选"));
     }
     auto candidates=[&](auto accept) {
         std::vector<std::size_t> result;
@@ -210,7 +210,7 @@ NewbornPlan PlanNewbornCats(const RoomSnapshot& s,std::uint64_t seed,NewbornRule
         if(destination[i]!=to) move(i,to,roomcats::Tx("二楼新生交换和平衡分配"));
     }
     for(auto i:candidates([&](auto j) { return destination[j]==3; }))
-        if(TotalStats(p.decisions[i].cat.details.genetic)<rules.breeding.genetic_min[2]) move(i,4,roomcats::Tx("一楼左遗传低于")+std::to_string(rules.breeding.genetic_min[2])+roomcats::Tx("，转备战"));
+        if(TotalStats(p.decisions[i].cat.details.genetic)<rules.breeding.genetic_min[2]) move(i,4,roomcats::Tx("一楼左遗传低于")+std::to_string(rules.breeding.genetic_min[2])+roomcats::Tx("，转战备"));
     for(std::size_t i=0;i<p.decisions.size();++i) if(destination[i]==4 && !ProtectedCat(p.decisions[i].cat)) {
         auto& d=p.decisions[i]; const auto total=TotalStats(d.cat.details.real);
         const int low=static_cast<int>(std::count_if(d.cat.details.real.begin(),d.cat.details.real.end(),[&](auto n) { return n<=rules.battle.low_stat_max; }));
@@ -218,7 +218,7 @@ NewbornPlan PlanNewbornCats(const RoomSnapshot& s,std::uint64_t seed,NewbornRule
         if(class_parent || FailsBattleScreen(d.cat,rules.battle)) {
             d.discard=true;
             if(!d.reason.empty()) d.reason+="；";
-            if(class_parent) { d.destination=d.cat.location_key; d.reason+=roomcats::Tx("带职业成年亲本不转战备，进入淘汰复查"); }
+            if(class_parent) { d.destination=d.cat.location_key; d.reason+=roomcats::Tx("落选的带职业亲本不留作战备，进入淘汰复查"); }
             else d.reason+=roomcats::Tx("备战真实总和 ")+std::to_string(total)+roomcats::Tx("（下限")+std::to_string(rules.battle.real_min)+roomcats::Tx("），真实≤")+std::to_string(rules.battle.low_stat_max)+roomcats::Tx("属性 ")+std::to_string(low)+roomcats::Tx(" 项");
         }
     }

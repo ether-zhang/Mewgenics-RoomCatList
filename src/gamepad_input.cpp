@@ -22,6 +22,7 @@ FindFn g_find = nullptr;
 FreeFn g_free = nullptr;
 std::atomic<void*> g_primary{nullptr};
 std::atomic<void*> g_recent{nullptr};
+std::atomic<bool> g_needs_observation{false};
 MouseRouter* g_mouse = nullptr;
 bool (*g_refresh_pointer)() = nullptr;
 std::mutex g_pad_lock;
@@ -35,20 +36,25 @@ bool __cdecl ButtonHook(void* pad, int button) {
     if (down) g_recent.store(pad,std::memory_order_relaxed);
     if (!g_ready || !g_mouse || !g_refresh_pointer) return down;
     const bool active = g_refresh_pointer();
+    if(!active && !g_needs_observation.load(std::memory_order_relaxed)) return down;
     if (pad != g_primary.load(std::memory_order_relaxed)) return active && g_mouse->CapturesPointer() ? false : down;
     std::lock_guard<std::mutex> lock(g_pad_lock);
     g_router.SetActive(active,*g_mouse);
-    return g_router.ButtonForGame(button,down,*g_mouse);
+    const bool result=g_router.ButtonForGame(button,down,*g_mouse);
+    g_needs_observation.store(g_router.NeedsObservation(),std::memory_order_relaxed);
+    return result;
 }
 std::int16_t __cdecl AxisHook(void* pad, int axis) {
     const auto value = g_original_axis(pad,axis);
     if (std::abs(int(value)) > 8000) g_recent.store(pad,std::memory_order_relaxed);
     if (!g_ready || !g_mouse || !g_refresh_pointer) return value;
     const bool active = g_refresh_pointer();
+    if(!active && !g_needs_observation.load(std::memory_order_relaxed)) return value;
     if (pad != g_primary.load(std::memory_order_relaxed))
         return axis >= 2 && active && g_mouse->CapturesPointer() ? 0 : value;
     std::lock_guard<std::mutex> lock(g_pad_lock);
     g_router.SetActive(active,*g_mouse);
+    g_needs_observation.store(g_router.NeedsObservation(),std::memory_order_relaxed);
     return g_router.AxisForGame(axis,value,*g_mouse);
 }
 float Normalize(std::int16_t value) {
@@ -120,6 +126,7 @@ GamepadFrame UpdateGamepadInput(bool capture) {
             io.AddMouseButtonEvent(0,click.down || (g_mouse->ListButtons() & 1u));
         }
         frame.back_pressed = g_router.TakeBack();
+        g_needs_observation.store(g_router.NeedsObservation(),std::memory_order_relaxed);
     }
     frame.connected = pad != nullptr;
     // Confirmation is a mouse click at the engine pointer, never a nav key.
@@ -134,6 +141,7 @@ void StopGamepadInput() {
     std::lock_guard<std::mutex> lock(g_pad_lock);
     if (g_mouse) g_router.Reset(*g_mouse);
     g_mouse = nullptr; g_refresh_pointer = nullptr; g_ready = false; g_device = 0;
+    g_needs_observation.store(false,std::memory_order_relaxed);
 }
 
 void CancelGamepadInput() {

@@ -24,6 +24,11 @@ private:
         if (!c.held) { c.held = true; c.owner = capture ? List : Game; }
     }
 public:
+    bool NeedsObservation() const {
+        if(active_ || pointer_registered_) return true;
+        for(const auto& c:buttons_) if(c.held && c.owner!=Game) return true;
+        return false;
+    }
     void SetActive(bool active, MouseRouter& mouse) {
         if (active == active_) return;
         if (pointer_registered_) {

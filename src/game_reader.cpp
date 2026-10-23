@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include <unordered_set>
+#include <unordered_map>
 #include <intrin.h>
 #include <cmath>
 #include <algorithm>
@@ -343,9 +344,27 @@ RoomSnapshot ReadFocusedRoom(std::uintptr_t image, bool include_cats, bool all_c
     }
     std::vector<std::uintptr_t> components;
     if (!Components(out.scene, components)) return out;
+    // All cats and furniture of a native class share its vtable. Resolve
+    // each distinct class once per snapshot instead of walking the same RTTI
+    // for every object in each pass. No pointers survive this snapshot.
+    static constexpr const char* scene_types[]={
+        ".?AVHouse@glaiel@@", ".?AVCatStatsDrawer@glaiel@@", ".?AVNPCMapDrawer@glaiel@@",
+        ".?AVHouseDrawerUI@glaiel@@", ".?AVHousePipe@glaiel@@",
+        ".?AVFurnitureGrid@glaiel@@", ".?AVButchBox@glaiel@@", ".?AVHouseCat@glaiel@@"};
+    std::unordered_map<std::uintptr_t,int> types;
+    types.reserve(32);
+    const auto type_of=[&](std::uintptr_t component) {
+        const auto table=Pointer(component);
+        const auto found=types.find(table);
+        if(found!=types.end()) return found->second;
+        int kind=-1;
+        for(int i=0;i<8;++i) if(IsType(component,image,scene_types[i])) { kind=i; break; }
+        types.emplace(table,kind);
+        return kind;
+    };
     std::uintptr_t house = 0;
     for (const auto component : components) {
-        if (IsType(component, image, ".?AVHouse@glaiel@@")) {
+        if ((type_of(component)==0)) {
             if (house) return out; // An ambiguous scene is not a usable snapshot.
             house = component;
         }
@@ -355,13 +374,13 @@ RoomSnapshot ReadFocusedRoom(std::uintptr_t image, bool include_cats, bool all_c
     Read(out.scene - 8, out.generation);
     for (const auto component : components) {
         if (Pointer(component + 0x20) != out.scene) continue;
-        if (IsType(component, image, ".?AVCatStatsDrawer@glaiel@@")) out.cat_drawer = component;
-        else if (IsType(component, image, ".?AVNPCMapDrawer@glaiel@@")) out.npc_drawer = component;
-        else if (IsType(component, image, ".?AVHouseDrawerUI@glaiel@@")) out.drawer_ui = component;
-        else if (IsType(component, image, ".?AVHousePipe@glaiel@@")) out.pipe = component;
+        if ((type_of(component)==1)) out.cat_drawer = component;
+        else if ((type_of(component)==2)) out.npc_drawer = component;
+        else if ((type_of(component)==3)) out.drawer_ui = component;
+        else if ((type_of(component)==4)) out.pipe = component;
     }
     out.room = requested_ids ? 0 : Pointer(house + 0x88);
-    if (out.room && (!IsType(out.room, image, ".?AVFurnitureGrid@glaiel@@") ||
+    if (out.room && (!(type_of(out.room)==5) ||
         Pointer(out.room + 0x20) != out.scene ||
         !ReadNarrowString(out.room + 0x40, out.room_id) || out.room_id.empty())) {
         out.error = roomcats::Tx("房间数据暂时不可用，请稍后重试。");
@@ -377,12 +396,12 @@ RoomSnapshot ReadFocusedRoom(std::uintptr_t image, bool include_cats, bool all_c
         CatLocation location;
         location.component = component;
         Read(component - 8, location.generation);
-        if (IsType(component, image, ".?AVFurnitureGrid@glaiel@@")) {
+        if ((type_of(component)==5)) {
             std::string id;
             if (!ReadNarrowString(component + 0x40, id) || id.empty()) continue;
             location.key = "room:" + id;
             location.label = RoomLabel(id);
-        } else if (IsType(component, image, ".?AVButchBox@glaiel@@")) {
+        } else if ((type_of(component)==6)) {
             location.kind = LocationKind::Box;
             location.key = "box:" + std::to_string(component);
             location.label = ++boxes == 1 ? roomcats::Tx("箱子") : roomcats::Tx("箱子 ") + std::to_string(boxes);
@@ -401,7 +420,7 @@ RoomSnapshot ReadFocusedRoom(std::uintptr_t image, bool include_cats, bool all_c
     Read(director + 0x580, game_day);
     std::unordered_set<std::uint64_t> seen;
     for (const auto component : components) {
-        if (!IsType(component, image, ".?AVHouseCat@glaiel@@") ||
+        if (!(type_of(component)==7) ||
             (!all_cats && out.room && Pointer(component + 0xE8) != out.room)) continue;
         Cat cat;
         if (requested_ids) {

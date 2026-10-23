@@ -5,6 +5,7 @@ int main() {
     using namespace roomcats;
     MouseRouter mouse;
     GamepadRouter pad;
+    CHECK(!pad.NeedsObservation());
     mouse.Move(20,20);
     CHECK(pad.ButtonForGame(0,true,mouse));
     mouse.SetPanel(true,{100,100,500,500});
@@ -58,9 +59,13 @@ int main() {
     mouse.Up(1); pad.TakeClicks(); CHECK(!ListLeftButtonDown(mouse));
     pad.ButtonForGame(0,true,mouse); pad.TakeClicks();
     pad.SetActive(false,mouse); clicks=pad.TakeClicks();
+    CHECK(pad.NeedsObservation()); // A held UI press still owns its release.
     CHECK(clicks.size()==1 && !clicks[0].down && !ListLeftButtonDown(mouse));
     pad.SetActive(true,mouse);
     CHECK(!pad.ButtonForGame(0,true,mouse) && pad.TakeClicks().empty());
+    pad.SetActive(false,mouse); pad.ButtonForGame(0,false,mouse);
+    CHECK(!pad.NeedsObservation()); // Closed/idle SDL polls need no routing lock.
+    pad.SetActive(true,mouse);
     pad.ButtonForGame(0,false,mouse); mouse.EndFrame();
     pad.ButtonForGame(0,true,mouse); pad.TakeClicks();
     pad.Reset(mouse); clicks=pad.TakeClicks();

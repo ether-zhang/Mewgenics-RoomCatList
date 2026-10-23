@@ -3,6 +3,8 @@
 #include <cassert>
 #include <cstring>
 #include <vector>
+#include <chrono>
+#include <iostream>
 
 namespace {
 int detail_reads = 0;
@@ -206,4 +208,54 @@ void TestRoomScopes() {
     Put(f.cat_b, 0x80, std::uint64_t(11));
     assert(!f.Read().valid);
     roomcats::ConfigureCatDetailsReader(nullptr);
+}
+
+void TestLargeHouse() {
+    using namespace roomcats;
+    HouseFixture f;
+    constexpr int count=180;
+    std::vector<Block<0x100>> actors(count*9);
+    std::vector<Block<0xC58>> records(count);
+    std::vector<Block<0x20>> nodes(count);
+    std::vector<std::uintptr_t> objects={Address(f.house),Address(f.room_a),Address(f.room_b),Address(f.empty_room),Address(f.box)};
+    std::array<std::uintptr_t,1024> buckets;
+    buckets.fill(Address(f.sentinel));
+    const auto cat_type=f.Type(0x12000,".?AVHouseCat@glaiel@@");
+    const auto other_type=f.Type(0x14000,".?AVHouseDecoration@glaiel@@");
+    for(int i=0;i<count;++i) {
+        const auto id=std::uint64_t(i+1);
+        for(int j=0;j<9;++j) {
+            auto& actor=actors[i*9+j];
+            Put(actor,0,j ? other_type : cat_type); Put(actor,0x20,Address(f.scene));
+            objects.push_back(Address(actor));
+        }
+        auto& cat=actors[i*9]; auto& data=records[i]; auto& node=nodes[i];
+        Put(cat,0x80,id); Put(cat,0x88,std::uint8_t(1)); Put(cat,0xE8,Address(f.room_a));
+        Put(data,0xC48,id); Put(data,0xC40,std::int64_t(-1)); Wide(data,0x18,L"Cat");
+        Stats stats; stats.fill(7); Put(data,0x6F0,stats);
+        const auto slot=(HashCatId(id)&511)*2;
+        Put(node,8,buckets[slot+1]); Put(node,0x10,id); Put(node,0x18,Address(data));
+        if(buckets[slot]==Address(f.sentinel)) buckets[slot]=Address(node);
+        buckets[slot+1]=Address(node);
+    }
+    Put(f.manager,0x100,Address(buckets)); Put(f.manager,0x118,std::uint64_t(511));
+    Put(f.component_list,0,std::uint32_t(objects.size())); Put(f.component_list,4,std::uint32_t(objects.size()));
+    Put(f.component_list,8,Address(objects)); ConfigureCatDetailsReader(ScopeDetails);
+    detail_reads=0;
+    const auto initial=f.Read();
+    assert(initial.valid && initial.cats.size()==count && detail_reads==count);
+    for(int i=0;i<count;++i) assert(initial.cats[i].id==std::uint64_t(i+1) && initial.cats[i].details.valid);
+    const auto start=std::chrono::steady_clock::now();
+    for(int i=0;i<200;++i) { const auto s=f.Read(); assert(s.valid && s.cats.size()==count); }
+    const auto middle=std::chrono::steady_clock::now();
+    for(int i=0;i<200;++i) assert(f.Read(false).valid);
+    const auto end=std::chrono::steady_clock::now();
+    assert(detail_reads==count); // Stable cats never recalculate native stats.
+    Put(records[17],0x6F0,int(8)); f.Read(); assert(detail_reads==count+1);
+    f.scene[0x4DA]=1; assert(f.Read().suspended && detail_reads==count+1);
+    ConfigureCatDetailsReader(nullptr);
+    std::cout << "180-cat / " << objects.size() << "-component snapshot: full_ms="
+        << std::chrono::duration<double,std::milli>(middle-start).count()/200
+        << "; metadata_ms=" << std::chrono::duration<double,std::milli>(end-middle).count()/200
+        << "; native recomputation only on change.\n";
 }

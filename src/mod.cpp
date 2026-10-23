@@ -52,17 +52,17 @@ roomcats::FontGlyphCache g_font_glyphs;
 constexpr auto kUiText = "猫咪列表 全屋猫咪 "
     "无可遗弃，存在调房：只猫咪。请点击右上角“确定处理”后执行调房。悬停下方“调房”数量可查看名单。 "
     "无可遗弃，无需调房；有只猫咪需要打标，点击“确定处理”后执行。也无需调房或打标。本轮处理进度见下方。 "
-    "筛选设置 新生猫 老猫 恢复默认 保存并关闭 取消 可填范围 至 需要在 之间 "
-    "排序：属性 > 优质变异 > 有无职业。房子标记始终保护；小猫年龄=1，老猫年龄>1。 "
-    "修改只影响新生成的方案；保存后仍须复查并确认。数值可直接输入，也可点击加减按钮。 "
-    "二楼新生每房最多可设6只；对面出生数量需小于等于每房上限。 "
+    "筛选设置 新生猫 大猫 恢复默认 保存并关闭 取消 可填范围 至 需要在 之间 "
+    "繁育比较遗传总属性，战备比较真实总属性；相同时先比优质突变数量，再看是否有职业。 "
+    "设置保存后会重新生成受影响的方案；复查并点击“确定处理”后才会执行。 "
+    "房子图标的猫始终保留。新生猫指年龄为1的猫；大猫指年龄大于1的猫。 "
     "遗传门槛需满足：顶楼 ≥ 二楼 ≥ 一楼左 对面出生数量不能超过二楼每房保留上限 战备真实下限 新生名额 "
     "重新复查 已保留原选择：此NPC当前不可用。请等待或手动修改去向。 默认优先送至第一个可选NPC 已恢复处理去向 "
-    "新生猫筛选复查 确定处理 停止处理 返回名单 处理方式 筛选原因 不遗弃 原地保留 打标 调房 优质变异 → "
-    "其他调整 老猫数量控制 预计总数 房子保护 舒适度 顶楼 二楼左 二楼右 一楼左 年龄 遗传门槛 允许轻度近亲 不参与筛选 "
-    "保留限制或手动选择使目标未达成；确认将执行当前选择。目标舒适度： 坏变异/疾病转备战；房子标记保留； "
+    "新生猫筛选复查 确定处理 停止处理 返回名单 处理方式 筛选原因 不遗弃 原地保留 打标 调房 优质突变 → "
+    "其他调整 大猫数量控制 预计总数 房子保护 舒适度 顶楼 二楼左 二楼右 一楼左 年龄 遗传门槛 允许轻度近亲 不参与筛选 "
+    "保留限制或手动选择使目标未达成；确认将执行当前选择。目标舒适度： 坏突变/疾病转战备；房子标记保留； "
     "等待投送管道复位 等待投送界面收起 "
-    "一楼左较弱亲本转备战近亲按轻中重偏科指至少两项真实值 确认前不修改猫咪悬停上方数量可查看调房摘要 没有需要遗弃的猫咪确认后执行打标和调房 步 ≥ ≤ "
+    "一楼左较弱亲本转战备近亲按轻中重偏科指至少两项真实值 确认前不修改猫咪悬停上方数量可查看调房摘要 没有需要遗弃的猫咪确认后执行打标和调房 步 ≥ ≤ "
     "职业 白色基线 总属性按七项平均 返回上一级 的父母 点击查看父母表格 不在家园 资料未找到 已故 此猫不在家园无法移动或投送无法打开家园详情 "
     "选择去向 遗弃 正在遗弃 已遗弃 手柄 左摇杆移动光标 点击 返回 右摇杆滚动 A B "
     "父母 近亲 无 轻 中 重 一楼左 一楼右 二楼左 二楼右 异 同 双 "
@@ -234,6 +234,10 @@ bool UpdateFont() {
     if (g_font_glyphs.CharacterCount() == 0) {
         g_font_glyphs.AddBasicLatin();
         g_font_glyphs.AddText(kUiText);
+        for(const auto& text:roomcats::UiTextCatalog()) {
+            g_font_glyphs.AddText(text.first.data());
+            g_font_glyphs.AddText(text.second);
+        }
         g_font_glyphs.AddText("简体中文 语言");
         for (const auto* label : roomcats::kCatColumnLabels) g_font_glyphs.AddText(label);
         for (const auto& icon : kClassIcons) g_font_glyphs.AddText(icon.label);
@@ -283,7 +287,10 @@ bool UpdateFont() {
     // Native TikaFont/TikaFontCN first; retain rare Unicode-name coverage.
     config.MergeMode=true;
     const std::string fallback=std::string(windows_path.data())+"\\Fonts\\msyh.ttc";
-    io.Fonts->AddFontFromFileTTF(fallback.c_str(),22.0f,&config,g_font_glyphs.Ranges());
+    // YaHei is optional on non-Chinese Windows. The bundled font must work
+    // without it instead of asserting and leaving a nonfunctional icon.
+    if(std::filesystem::is_regular_file(std::filesystem::u8path(fallback),font_error))
+        io.Fonts->AddFontFromFileTTF(fallback.c_str(),22.0f,&config,g_font_glyphs.Ranges());
     roomcats::BuildMarkerGlyphs(*io.Fonts, font);
     return ImGui_ImplOpenGL3_CreateFontsTexture();
 }
@@ -295,9 +302,16 @@ void NativeSidebarClicked() {
 void DrawListBeforeCursor();
 
 bool Initialize(HDC dc) {
+    g_window = WindowFromDC(dc);
+    if(const auto* error=roomcats::NativeSidebarStartupError()) {
+        Log(error);
+        MessageBoxA(g_window,error,"RoomCatList could not start",MB_OK|MB_ICONINFORMATION);
+        return false;
+    }
     std::string reason;
     if (!roomcats::ValidateGameBuild(reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)), reason)) {
         Log(reason);
+        MessageBoxA(g_window,"This game build is not compatible with RoomCatList. Supported: Steam build 25143593. The legacyv1_0 branch is not supported.","RoomCatList could not start",MB_OK|MB_ICONINFORMATION);
         return false;
     }
     g_window = WindowFromDC(dc);
@@ -313,6 +327,7 @@ bool Initialize(HDC dc) {
     io.IniFilename = g_ini_path.c_str();
     RegisterScreeningRulesSettings();
     RegisterLanguageSettings();
+    RegisterDisplaySettings();
     io.LogFilename = nullptr;
     // The list is drawn before the engine's cursor pass. Keep that single
     // native cursor above the panel, including the title bar and scrollbar.
@@ -324,7 +339,10 @@ bool Initialize(HDC dc) {
         Log("Could not initialize the in-game OpenGL UI.");
         return false;
     }
-    if (!UpdateFont()) return false;
+    if (!UpdateFont()) {
+        MessageBoxA(g_window,"RoomCatList could not load its bundled UI font. Reinstall the complete Mod ZIP, including the assets folder.","RoomCatList could not start",MB_OK|MB_ICONINFORMATION);
+        return false;
+    }
     SetLastError(0);
     const auto previous = SetWindowLongPtrW(g_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WindowProc));
     if (!previous && GetLastError() != 0) {
@@ -335,9 +353,11 @@ bool Initialize(HDC dc) {
     g_initialized = true;
     // Native buttons are scene-owned and share the engine's input/render order.
     const bool native_started = roomcats::StartNativeSidebar(NativeSidebarClicked, DrawListBeforeCursor, g_mouse, RefreshInputPointer);
-    if (!native_started)
+    if (!native_started) {
         Log("Native sidebar could not start. See mod_logs/chainloader.log for the native-UI diagnostic.");
-    Log(std::string("RoomCatList 0.15.7 ready; native sidebar/input startup=") + (native_started ? "yes" : "no") + "; native NPC visit sequencing; Dwarfism classified as ordinary good mutation.");
+        MessageBoxA(g_window,"RoomCatList could not initialize its sidebar. Check that all Mod files are from the same version and Mewjector API v3 is installed.","RoomCatList could not start",MB_OK|MB_ICONINFORMATION);
+    }
+    Log(std::string("RoomCatList 0.16.2 ready; native sidebar/input startup=") + (native_started ? "yes" : "no") + "; button-anchored grouping, footer text-size controls (75-150%) and English default.");
     return native_started;
 }
 
@@ -398,7 +418,7 @@ void HandleScreeningRequests() {
     }
     const auto progress=roomcats::GetNewbornBatchStatus();
     const auto message=progress.message.empty() ? std::string{} :
-        std::string(progress.kind==roomcats::ScreeningKind::Adult ? roomcats::Tx("老猫控制 ") : roomcats::Tx("新生筛选 "))+std::to_string(progress.completed)+"/"+std::to_string(progress.total)+roomcats::Tx(" 步：")+progress.message;
+        std::string(progress.kind==roomcats::ScreeningKind::Adult ? roomcats::Tx("大猫控制 ") : roomcats::Tx("新生筛选 "))+std::to_string(progress.completed)+"/"+std::to_string(progress.total)+roomcats::Tx(" 步：")+progress.message;
     if(!message.empty() && message!=g_last_newborn_message) {
         g_last_newborn_message=message; g_move_feedback=message; g_font_scan_pending=true;
         Log("Newborn batch: running="+std::string(progress.running ? "yes" : "no")+"; complete="+
@@ -470,9 +490,9 @@ void DrawListBeforeCursor() {
                     ImGui::GetIO().MouseDrawCursor = false;
                 }
                 ImGui::Render();
-                if((g_rules_save_requested || g_language_save_requested) && !g_ini_path.empty()) {
+                if((g_rules_save_requested || g_language_save_requested || g_display_save_requested) && !g_ini_path.empty()) {
                     ImGui::SaveIniSettingsToDisk(g_ini_path.c_str());
-                    g_rules_save_requested=g_language_save_requested=false;
+                    g_rules_save_requested=g_language_save_requested=g_display_save_requested=false;
                 }
                 ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             }

@@ -30,6 +30,7 @@ std::string g_mod_folder;
 std::string g_game_folder;
 std::atomic<bool> g_assets_registered{false};
 bool g_bootstrap_ready = false;
+const char* g_startup_error = "RoomCatList requires Mewjector API v3. Check the loader installation and chainloader.ini entry.";
 SidebarClick g_click = nullptr;
 using MousePosition = double* (__fastcall*)(void*, double*);
 using DrawCursor = void (__fastcall*)(void*);
@@ -240,7 +241,10 @@ void __cdecl UiTick(void*) {
 }
 
 void BootstrapNativeAssets(HMODULE module) {
-    if (!MJ_Resolve(&g_api) || !VerifyNativeCode()) return;
+    if (!MJ_Resolve(&g_api)) return;
+    g_startup_error="This game version or another installed mod is not compatible with RoomCatList. This version targets Steam build 25143593; legacyv1_0 (1.0.20941) is not supported.";
+    if (!VerifyNativeCode()) return;
+    g_startup_error="RoomCatList could not register its sidebar resources. Reinstall the complete Mod ZIP and check its chainloader.ini entry.";
     std::array<wchar_t, 32768> path{};
     const auto length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
     if (!length || length >= path.size()) return;
@@ -269,7 +273,10 @@ void BootstrapNativeAssets(HMODULE module) {
     }
     g_next_args = reinterpret_cast<ProcessArgs>(next);
     g_bootstrap_ready = true;
+    g_startup_error = nullptr;
 }
+
+const char* NativeSidebarStartupError() { return g_startup_error; }
 
 bool StartNativeSidebar(SidebarClick click, void (*draw_list)(), MouseRouter& mouse, bool (*refresh_pointer)()) {
     if (!g_bootstrap_ready) return false;

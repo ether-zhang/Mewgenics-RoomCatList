@@ -17,12 +17,17 @@ roomcats::RoomSnapshot ScreeningSnapshot(const roomcats::RoomSnapshot& meta) {
 }
 void SetupScreeningColumns() {
     using namespace roomcats;
-    auto setup=[](int col) { ImGui::TableSetupColumn(roomcats::Tx(kCatColumnLabels[col]),ImGuiTableColumnFlags_WidthFixed,kCatColumnWidths[col],col); };
+    auto setup=[](int col) {
+        float width=kCatColumnWidths[col]*ListFontScale();
+        if(col==SexOrientation && !roomcats::Chinese())
+            width=std::max(width,ImGui::CalcTextSize("None/H/None").x+ImGui::GetStyle().CellPadding.x*2);
+        ImGui::TableSetupColumn(roomcats::Tx(kCatColumnLabels[col]),ImGuiTableColumnFlags_WidthFixed,width,col);
+    };
     if(!g_view.screening) { for(int col=0;col<CatColumnCount;++col) setup(col); return; }
-    ImGui::TableSetupColumn(roomcats::Tx("处理方式"),ImGuiTableColumnFlags_WidthFixed,210);
+    ImGui::TableSetupColumn(roomcats::Tx("处理方式"),ImGuiTableColumnFlags_WidthFixed,210*ListFontScale());
     setup(Name); setup(Position); setup(SendTo);
     for(int col=Parents;col<CatColumnCount;++col) setup(col);
-    ImGui::TableSetupColumn(roomcats::Tx("筛选原因"),ImGuiTableColumnFlags_WidthFixed,420);
+    ImGui::TableSetupColumn(roomcats::Tx("筛选原因"),ImGuiTableColumnFlags_WidthFixed,420*ListFontScale());
 }
 std::string ScreeningNpcLabel(const roomcats::NpcChoice& choice) {
     // Put status first so it remains visible in a narrow destination column.
@@ -47,9 +52,17 @@ void DrawScreeningChoice(const roomcats::Cat& cat) {
     using namespace roomcats;
     auto* decision=ScreeningDecision(cat.id);
     if(!decision) return;
-    auto npc_choices=decision->choice==ReviewChoice::Npc ? CatNpcChoices(g_screening_plan->source,cat.id) : std::vector<NpcChoice>{};
-    const auto selected=std::find_if(npc_choices.begin(),npc_choices.end(),[&](const auto& c) { return c.npc==decision->npc; });
-    const bool unavailable=decision->choice==ReviewChoice::Npc && (selected==npc_choices.end() || !selected->enabled);
+    std::vector<NpcChoice> npc_choices;
+    if(decision->choice==ReviewChoice::Npc) {
+        auto& preview=g_npc_previews[cat.id];
+        const double now=ImGui::GetTime();
+        if(preview.time<0 || now<preview.time || now-preview.time>=0.25) {
+            preview.choices=CatNpcChoices(g_screening_plan->source,cat.id); preview.time=now;
+        }
+        npc_choices=preview.choices;
+    }
+    auto selected=std::find_if(npc_choices.begin(),npc_choices.end(),[&](const auto& c) { return c.npc==decision->npc; });
+    bool unavailable=decision->choice==ReviewChoice::Npc && (selected==npc_choices.end() || !selected->enabled);
     ImGui::PushID(reinterpret_cast<void*>(static_cast<std::uintptr_t>(cat.id)));
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::BeginDisabled(g_screening_submitted || NewbornBatchActive());
@@ -58,7 +71,11 @@ void DrawScreeningChoice(const roomcats::Cat& cat) {
     if(unavailable) ImGui::PopStyleColor();
     const bool hovered=ImGui::IsItemHovered();
     if(expanded) {
-        if(decision->choice!=ReviewChoice::Npc) npc_choices=CatNpcChoices(g_screening_plan->source,cat.id);
+        // Menus and the action queue revalidate live; only the closed preview
+        // is cached, so changing NPC capacity cannot authorize a stale send.
+        npc_choices=CatNpcChoices(g_screening_plan->source,cat.id);
+        selected=std::find_if(npc_choices.begin(),npc_choices.end(),[&](const auto& c) { return c.npc==decision->npc; });
+        unavailable=decision->choice==ReviewChoice::Npc && (selected==npc_choices.end() || !selected->enabled);
         g_move_popup_cat=cat.id; g_move_popup_drawn=true; g_mouse.SetPopupOpen(true); ClearTraitHover();
         bool changed=false;
         if(ImGui::Selectable(roomcats::Tx("遗弃"),decision->choice==ReviewChoice::Discard)) { decision->choice=ReviewChoice::Discard; changed=true; }
@@ -101,23 +118,32 @@ void DrawScreeningToolbar() {
     const bool recheck=g_view.screening && g_screening_submitted && progress.stopped;
     const char* label=progress.running ? roomcats::Tx("停止处理") : g_view.screening && !g_screening_submitted ? roomcats::Tx("确定处理") : recheck ? roomcats::Tx("重新复查") : roomcats::Tx("新生猫筛选");
     const bool choosing=!progress.running && !recheck && (!g_view.screening || g_screening_submitted);
-    const char* adult=roomcats::Tx("老猫数量控制");
+    const char* adult=roomcats::Tx("大猫数量控制");
     const float settings_width=ImGui::CalcTextSize(roomcats::Tx("筛选设置")).x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetStyle().ItemSpacing.x;
-    const float width=118+ImGui::GetStyle().ItemSpacing.x+settings_width+ImGui::CalcTextSize(label).x+ImGui::GetStyle().FramePadding.x*2 +
+    const float group_width=ImGui::CalcTextSize(CatGroupButtonLabel().c_str()).x+ImGui::GetStyle().FramePadding.x*2;
+    const float language_width=LanguageSelectorWidth();
+    const float width=group_width+ImGui::GetStyle().ItemSpacing.x+language_width+ImGui::GetStyle().ItemSpacing.x+settings_width+ImGui::CalcTextSize(label).x+ImGui::GetStyle().FramePadding.x*2 +
         (choosing ? ImGui::CalcTextSize(adult).x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetStyle().ItemSpacing.x : 0);
     const float right=ImGui::GetWindowContentRegionMax().x;
     const float after_label=ImGui::GetItemRectMax().x-ImGui::GetWindowPos().x+ImGui::GetStyle().ItemSpacing.x;
+    const auto same_line_if_fits=[&](const char* next) {
+        const float end=ImGui::GetItemRectMax().x-ImGui::GetWindowPos().x+ImGui::GetStyle().ItemSpacing.x;
+        if(end+ImGui::CalcTextSize(next).x+ImGui::GetStyle().FramePadding.x*2<=right) ImGui::SameLine();
+    };
     if(right-width>=after_label) ImGui::SameLine(right-width);
     else ImGui::NewLine();
+    DrawCatGroupButton();
+    const float after_group=ImGui::GetItemRectMax().x-ImGui::GetWindowPos().x+ImGui::GetStyle().ItemSpacing.x;
+    if(after_group+language_width<=right) ImGui::SameLine();
     ImGui::BeginDisabled(progress.running);
     DrawLanguageSelector();
-    ImGui::EndDisabled(); ImGui::SameLine();
+    ImGui::EndDisabled(); same_line_if_fits(roomcats::Tx("筛选设置"));
     ImGui::BeginDisabled(progress.running);
     if(roomcats::ui::Button(roomcats::Tx("筛选设置"))) OpenScreeningSettings();
-    ImGui::EndDisabled(); ImGui::SameLine();
+    ImGui::EndDisabled(); same_line_if_fits(choosing ? adult : label);
     if(choosing) {
         if(roomcats::ui::Button(adult)) { g_prepare_screening_kind=roomcats::ScreeningKind::Adult; g_prepare_screening=true; }
-        ImGui::SameLine();
+        same_line_if_fits(label);
     }
     if(roomcats::ui::Button(label)) {
         if(progress.running) roomcats::StopNewbornBatch();
@@ -159,7 +185,7 @@ void DrawScreeningSummary() {
         ImGui::BeginTooltip(); ImGui::PushTextWrapPos(640);
         for(const auto& d:g_screening_plan->decisions)
             if(d.destination!=d.cat.location_key && !d.discard)
-                ImGui::Text(roomcats::Tx("%s：%s → %s（遗传 %lld，优质变异 %d）"),d.cat.name.c_str(),d.cat.location_label.c_str(),
+                ImGui::Text(roomcats::Tx("%s：%s → %s（遗传 %lld，优质突变 %d）"),d.cat.name.c_str(),d.cat.location_label.c_str(),
                     roomcats::RoomLabel(d.destination.substr(5)).c_str(),roomcats::TotalStats(d.cat.details.genetic),roomcats::QualityMutations(d.cat.details));
         for(const auto& note:g_screening_plan->notes) ImGui::TextWrapped("%s",note.c_str());
         ImGui::PopTextWrapPos(); ImGui::EndTooltip();
@@ -174,10 +200,10 @@ void DrawScreeningSummary() {
         for(int r=0;r<4;++r) below|=projected.comfort[r]+1e-6<rules.comfort_min[r];
         if(projected.total>rules.population_target || below)
             ImGui::TextColored(roomcats::ui::Warning(),roomcats::Tx("保留限制或手动选择使目标未达成。目标舒适度：%d / %d / %d / %d。"),rules.comfort_min[0],rules.comfort_min[1],rules.comfort_min[2],rules.comfort_min[3]);
-        else ImGui::TextDisabled(roomcats::Tx("年龄>1 · 遗传门槛 %d/%d/%d · 战备真实下限 %d · 房子标记保留"),rules.breeding.genetic_min[0],rules.breeding.genetic_min[1],rules.breeding.genetic_min[2],rules.battle.real_min);
+        else ImGui::TextDisabled(roomcats::Tx("年龄>1 · 繁育遗传总属性（顶楼/二楼/一楼左）：%d/%d/%d · 战备真实总属性至少 %d"),rules.breeding.genetic_min[0],rules.breeding.genetic_min[1],rules.breeding.genetic_min[2],rules.battle.real_min);
     } else {
         const auto& rules=g_screening_plan->newborn_rules;
-        ImGui::TextDisabled(roomcats::Tx("遗传门槛 %d/%d/%d · 新生名额 %d/%d · 战备真实下限 %d · 房子标记保留"),
+        ImGui::TextDisabled(roomcats::Tx("遗传总属性（顶楼/二楼/一楼左）：%d/%d/%d · 每房新生上限（顶/二楼）：%d/%d · 战备总属性至少 %d"),
             rules.breeding.genetic_min[0],rules.breeding.genetic_min[1],rules.breeding.genetic_min[2],rules.attic_limit,rules.second_limit,rules.battle.real_min);
     }
     const auto progress=roomcats::GetNewbornBatchStatus();

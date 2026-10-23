@@ -62,12 +62,13 @@ int MakeUiThemePreview(bool chinese) {
     ImGui::CreateContext(); ui::Apply(); RegisterScreeningRulesSettings();
     auto& io=ImGui::GetIO(); io.IniFilename=io.LogFilename=nullptr;io.DisplaySize={1960,1100};io.DeltaTime=1.0f/60;
     ImFontGlyphRangesBuilder ranges; ranges.AddRanges(io.Fonts->GetGlyphRangesDefault());
+    for(const auto& text:UiTextCatalog()) { ranges.AddText(text.first.data()); ranges.AddText(text.second); }
     ranges.AddText("。，：；（）“”≥≤！");
     ranges.AddText("简体中文 语言");
     ranges.AddText("猫咪列表全屋猫咪只名字职业位置送至选择去向序号父母年龄性取繁总实遗力量敏捷体质智力速度魅力幸运好突变坏突变疾病");
     ranges.AddText("桑葚乐乐清歌肥肥卢锡安百合西奥胖墩煤球米莉森雷恩加尔蔚卡蜜尔哈娜蓝莓顶楼阁楼一楼左右二楼左右箱子真言男母公异同无轻中重");
-    ranges.AddText("筛选设置新生猫筛选老猫数量控制新生猫老猫确定处理返回名单保存并关闭恢复默认取消调房遗弃原地保留打标优质变异");
-    ranges.AddText("排序属性有无职业房子标记始终保护小猫老猫修改只影响新生成的方案保存后仍须复查并确认数值可直接输入也可点击加减按钮二楼每房最多可设对面出生数量需小于等于每房上限滚轮上下左右点击表头排序关闭未知全部突变固定属性合计总计条件效果见左侧身体突变腿部缺陷速度减少天生敏捷减少严重影响行动");
+    ranges.AddText("筛选设置新生猫筛选大猫数量控制新生猫大猫确定处理返回名单保存并关闭恢复默认取消调房遗弃原地保留打标优质突变");
+    ranges.AddText("排序属性有无职业房子标记始终保护小猫大猫修改只影响新生成的方案保存后仍须复查并确认数值可直接输入也可点击加减按钮二楼每房最多可设对面出生数量需小于等于每房上限滚轮上下左右点击表头排序关闭未知全部突变固定属性合计总计条件效果见左侧身体突变腿部缺陷速度减少天生敏捷减少严重影响行动");
     VisitScreeningRules(g_screening_rules,[&](const auto&,const char* label,const auto&,int,int) { ranges.AddText(label); });
     ImVector<ImWchar> glyphs; ranges.BuildRanges(&glyphs);
     auto* font=io.Fonts->AddFontFromFileTTF((root/"build/assets/native-ui.ttf").string().c_str(),22,nullptr,glyphs.Data);
@@ -100,7 +101,7 @@ int MakeUiThemePreview(bool chinese) {
     CHECK_NEWBORN(g_trait_hover.cat==1 && g_trait_hover.group==1);
     ExportImage(root/(std::string("build/ui-theme-traits-")+suffix+".ppm"));
     const auto width=[&](const char* label) { return ImGui::CalcTextSize(label).x+style.FramePadding.x*2; };
-    const float x=panel->ContentRegionRect.Max.x-width(Tx("新生猫筛选"))-width(Tx("老猫数量控制"))-
+    const float x=panel->ContentRegionRect.Max.x-width(Tx("新生猫筛选"))-width(Tx("大猫数量控制"))-
         style.ItemSpacing.x*2-width(Tx("筛选设置"))*.5f;
     const float y=panel->WorkRect.Min.y+ImGui::GetFrameHeight()*.5f;
     g_mouse.Move(int(x),int(y));io.AddMousePosEvent(x,y);Frame();
@@ -108,6 +109,19 @@ int MakeUiThemePreview(bool chinese) {
     for(int i=0;i<15;++i) Frame();
     CHECK_NEWBORN(g_rules_popup_drawn);
     ExportImage(root/(std::string("build/ui-theme-settings-")+suffix+".ppm"));
+    g_close_move_popup=true; Frame(); SetCatGroup(CatGroup::Location); SetListFontPercent(150);
+    for(int i=0;i<4;++i) Frame();
+    ExportImage(root/(std::string("build/ui-theme-display-")+suffix+".ppm"));
+    SetListFontPercent(75);
+    for(int i=0;i<4;++i) Frame();
+    ExportImage(root/(std::string("build/ui-theme-small-")+suffix+".ppm"));
+    SetListFontPercent(100);
+    g_mouse.Move(-100,-100); io.AddMousePosEvent(-100,-100);
+    for(int i=0;i<4;++i) Frame();
+    ImGui::ActivateItemByID(ImHashStr("###RoomCatGroupButton",0,panel->ID));
+    for(int i=0;i<4;++i) Frame();
+    CHECK_NEWBORN(g_display_popup_drawn);
+    ExportImage(root/(std::string("build/ui-theme-grouping-")+suffix+".ppm"));
     ui::Reset();ImGui::DestroyContext();
     std::cout<<"Native theme previews rendered from production UI, using extracted paper, button states and TikaFont/TikaFontCN.\n";
     return 0;

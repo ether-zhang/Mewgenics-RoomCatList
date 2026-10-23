@@ -27,7 +27,7 @@ int main() {
     assert((SortCatRows(cats, age) == std::vector<int>{1, 2, 0, 3}));
     age.Click(Age);
     assert((SortCatRows(cats, age) == std::vector<int>{0, 1, 2, 3}));
-    assert(!age.Click(SexOrientation) && age.column == Age);
+    assert(!age.Click(Parents) && age.column == Age);
     assert(SortCatRows({}, age).empty());
     std::vector<Cat> mixed{cats[0], cats[1]};
     mixed[0].details.real = {10, 0, 0, 0, 0, 0, 0};
@@ -37,6 +37,21 @@ int main() {
     CatSort total;
     total.Click(Total);
     assert((SortCatRows(mixed, total) == std::vector<int>{1, 0}));
+    cats[0].name="Alpha"; cats[1].name="Beta"; cats[2].name="Alpha"; cats[3].name="Delta";
+    CatSort names; names.Click(Name);
+    assert(names.Ascending() && (SortCatRows(cats,names)==std::vector<int>{0,2,1,3}));
+    names.Click(Name); assert((SortCatRows(cats,names)==std::vector<int>{3,1,0,2}));
+    for(int col:{GoodMutations,BadMutations,Diseases}) {
+        cats[0].details.good.resize(1); cats[0].details.bad.resize(1); cats[0].details.diseases.resize(1);
+        cats[1].details.good.resize(3); cats[1].details.bad.resize(3); cats[1].details.diseases.resize(3);
+        CatSort count; count.Click(col);
+        assert((SortCatRows(cats,count)==std::vector<int>{1,0,2,3}));
+        count.Click(col); assert((SortCatRows(cats,count)==std::vector<int>{2,0,1,3}));
+        count.Click(col); assert(count.mode==0);
+    }
+    cats[0].location_key="A"; cats[1].location_key="B"; cats[2].location_key="A"; cats[3].location_key="B";
+    CatSort grouped; grouped.Click(Age);
+    assert((SortCatRows(cats,grouped,CatGroup::Location)==std::vector<int>{2,0,1,3}));
     total.Click(Total);
     assert((SortCatRows(mixed, total) == std::vector<int>{0, 1}));
     total.Click(Total);

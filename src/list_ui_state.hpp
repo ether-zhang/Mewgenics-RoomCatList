@@ -15,9 +15,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <charconv>
 #include <optional>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 // Shared by the injected Mod and platform-free UI tests.
 namespace {
@@ -54,6 +56,20 @@ roomcats::ScreeningRules g_screening_rules, g_rules_draft;
 bool g_rules_popup_drawn=false, g_rules_save_requested=false;
 bool g_language_popup_drawn=false;
 bool g_language_save_requested=false;
+constexpr int kMinFontPercent=75, kMaxFontPercent=150, kFontPercentStep=5;
+int g_font_percent = 100;
+roomcats::CatGroup g_group = roomcats::CatGroup::None;
+bool g_display_popup_drawn=false, g_display_save_requested=false;
+bool g_resize_for_font=false;
+struct CatTableRow { int cat=-1; std::string label; int count=0; };
+std::vector<CatTableRow> g_table_rows;
+struct NpcPreview { double time=-1; std::vector<roomcats::NpcChoice> choices; };
+std::unordered_map<std::uint64_t,NpcPreview> g_npc_previews;
+float ListFontScale() { return g_font_percent / 100.0f; }
+void RegisterDisplaySettings();
+void ApplyListFontScale() {
+    ImGui::SetWindowFontScale(ListFontScale()/ImGui::GetCurrentWindow()->FontWindowScaleParents);
+}
 std::string g_rules_load_text, g_rules_error;
 void RegisterScreeningRulesSettings();
 void RegisterLanguageSettings();

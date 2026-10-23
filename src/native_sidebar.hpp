@@ -6,6 +6,7 @@
 namespace roomcats {
 using SidebarClick = void (*)();
 void BootstrapNativeAssets(HMODULE module);
+const char* NativeSidebarStartupError();
 bool StartNativeSidebar(SidebarClick click, void (*draw_list)(), MouseRouter& mouse, bool (*refresh_pointer)());
 bool ReadNativeVirtualPointer(float& x, float& y);
 void SetNativeListMouseCapture(bool capture);

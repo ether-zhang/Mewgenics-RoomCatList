@@ -22,7 +22,7 @@ ImGuiWindow* Modal() { return ImGui::FindWindowByName("筛选设置###ScreeningS
 void Open() {
     auto* panel=ImGui::FindWindowByName("猫咪列表###RoomCatsPanel"); const auto& style=ImGui::GetStyle();
     const auto button=[&](const char* label) { return ImGui::CalcTextSize(label).x+style.FramePadding.x*2; };
-    Point(panel->WorkRect.Max.x-button("新生猫筛选")-button("老猫数量控制")-style.ItemSpacing.x*2-button("筛选设置")*.5f,
+    Point(panel->WorkRect.Max.x-button("新生猫筛选")-button("大猫数量控制")-style.ItemSpacing.x*2-button("筛选设置")*.5f,
         panel->WorkRect.Min.y+ImGui::GetFrameHeight()*.5f); Frame(2); Click();
 }
 void Footer(bool save) {

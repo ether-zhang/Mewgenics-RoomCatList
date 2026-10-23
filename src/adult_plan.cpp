@@ -34,7 +34,7 @@ NewbornPlan PlanAdultCats(const RoomSnapshot& s,std::uint64_t seed,AdultRules ru
     ScreeningRules validation; validation.adult=rules; p.error=ValidateScreeningRules(validation); if(!p.error.empty()) return p;
     p.fingerprint=ScreeningFingerprint(s,p.kind);
     if(!s.valid || !s.in_house || s.suspended || s.game_day<0 || !s.population_comfort_valid) {
-        p.error=roomcats::Tx("家园或舒适度数据尚未就绪，请稍后重新生成老猫方案"); return p;
+        p.error=roomcats::Tx("家园或舒适度数据尚未就绪，请稍后重新生成大猫方案"); return p;
     }
     std::array<std::string,5> rooms;
     std::array<double,5> effects{};
@@ -42,7 +42,7 @@ NewbornPlan PlanAdultCats(const RoomSnapshot& s,std::uint64_t seed,AdultRules ru
     for(const auto& room:s.locations) {
         const int r=int(NurseryOf(room.key)); if(r<0) continue;
         if(!rooms[r].empty() || !std::isfinite(room.comfort_base) || std::abs(room.comfort_base)>100000) {
-            p.error=roomcats::Tx("房间或舒适度数据不完整，无法生成老猫方案"); return p;
+            p.error=roomcats::Tx("房间或舒适度数据不完整，无法生成大猫方案"); return p;
         }
         rooms[r]=room.key; effects[r]=room.comfort_base;
     }
@@ -53,7 +53,7 @@ NewbornPlan PlanAdultCats(const RoomSnapshot& s,std::uint64_t seed,AdultRules ru
     for(const auto& cat:s.cats) if(cat.active && !cat.record_only) {
         const int r=int(NurseryOf(cat.location_key));
         if(!ids.insert(cat.id).second || !std::isfinite(cat.comfort_effect) || std::abs(cat.comfort_effect)>100000) {
-            p.error=roomcats::Tx("猫咪或房间效果数据不完整，无法生成老猫方案"); return p;
+            p.error=roomcats::Tx("猫咪或房间效果数据不完整，无法生成大猫方案"); return p;
         }
         if(r>=0 && !ProtectedCat(cat) && (!cat.details.valid || (cat.details.age>1 && r<4 &&
             (!std::isfinite(cat.details.inbreeding) || cat.details.inbreeding<0)))) {
@@ -77,8 +77,8 @@ NewbornPlan PlanAdultCats(const RoomSnapshot& s,std::uint64_t seed,AdultRules ru
     for(auto i:adults) if(origin[i]<4) {
         const auto& c=p.decisions[i].cat;
         relocate(i,4);
-        if(BreedingHealthRisk(c,rules.breeding)) p.decisions[i].reason=roomcats::Tx("有坏变异或疾病，转备战筛选");
-        else if(c.details.inbreeding>(rules.allow_mild_first ? 0.25 : 0.1)) p.decisions[i].reason=roomcats::Tx("近亲程度超过允许范围，转备战筛选");
+        if(BreedingHealthRisk(c,rules.breeding)) p.decisions[i].reason=roomcats::Tx("有坏突变或疾病，转战备筛选");
+        else if(c.details.inbreeding>(rules.allow_mild_first ? 0.25 : 0.1)) p.decisions[i].reason=roomcats::Tx("近亲程度超过允许范围，转战备筛选");
         else breeders.push_back(i);
     }
     auto rank=[&](std::size_t a,std::size_t b,bool dex=false) { return BetterBreeder(p.decisions[a].cat,p.decisions[b].cat,seed,dex && rules.breeding.prioritize_dex,true,rules.breeding.preferred_dex); };
@@ -124,7 +124,7 @@ NewbornPlan PlanAdultCats(const RoomSnapshot& s,std::uint64_t seed,AdultRules ru
         const bool class_rejected=rules.class_no_battle && origin[i]<4 && destination[i]==4 && HasCatClass(d.cat.details);
         if(destination[i]==4 && (class_rejected || FailsBattleScreen(d.cat,rules.battle))) {
             if(!d.reason.empty()) d.reason+="；";
-            if(class_rejected) { d.destination=d.cat.location_key; d.reason=roomcats::Tx("带职业老猫未能留在繁育房，不转战备，进入淘汰复查"); }
+            if(class_rejected) { d.destination=d.cat.location_key; d.reason=roomcats::Tx("带职业大猫未能留在繁育房，不转战备，进入淘汰复查"); }
             else d.reason+=roomcats::Tx("备战真实总和低于")+std::to_string(rules.battle.real_min)+(rules.battle.reject_lopsided ? roomcats::Tx("或至少")+std::to_string(rules.battle.low_stat_count)+roomcats::Tx("项真实值≤")+std::to_string(rules.battle.low_stat_max) : "");
             d.discard=true; relocate(i,-1);
         }
@@ -159,9 +159,9 @@ NewbornPlan PlanAdultCats(const RoomSnapshot& s,std::uint64_t seed,AdultRules ru
         relocate(i,-1); --total;
     }
     p.notes.push_back(roomcats::Tx("只调整年龄大于1的猫；房子标记始终保留。幼猫、箱子及其他位置计入总数但不自动调动。"));
-    p.notes.push_back(roomcats::Tx("繁育房按遗传属性、优质变异、有无职业比较；战备按真实属性、优质能力、有无职业比较。"));
+    p.notes.push_back(roomcats::Tx("繁育房按遗传属性、优质突变、有无职业比较；战备按真实属性、优质能力、有无职业比较。"));
     if(rules.breeding.prioritize_dex) p.notes.push_back(roomcats::Tx("顶楼优先遗传敏捷为")+std::to_string(rules.breeding.preferred_dex)+roomcats::Tx("的猫。"));
-    if(rules.class_no_battle) p.notes.push_back(roomcats::Tx("繁育房淘汰的带职业老猫不转战备，直接进入淘汰复查；原本在战备房的猫仍按真实能力筛选。"));
+    if(rules.class_no_battle) p.notes.push_back(roomcats::Tx("繁育房淘汰的带职业大猫不转战备，直接进入淘汰复查；原本在战备房的猫仍按真实能力筛选。"));
     if(total>rules.population_target) p.notes.push_back(roomcats::Tx("受保护猫、幼猫或舒适度限制，当前方案无法降至")+std::to_string(rules.population_target)+roomcats::Tx("只；不会扩大淘汰范围。"));
     for(int r=0;r<4;++r) if(comfort(r)+1e-6<rules.comfort_min[r])
         p.notes.push_back(RoomLabel(rooms[r].substr(5))+roomcats::Tx(" 受固定住猫或家具限制，无法达到舒适度目标。"));
