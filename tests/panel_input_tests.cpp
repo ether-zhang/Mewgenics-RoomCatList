@@ -14,6 +14,7 @@ int TestNewbornBatch();
 int TestScreeningPanel();
 int TestLanguagePanel();
 int TestDisplayPanel();
+int TestBottomRows();
 
 namespace {
 int game_downs = 0, game_ups = 0, game_wheels = 0;
@@ -383,5 +384,5 @@ int main(int argc,char** argv) {
     std::cout << "Move selector passed: box choice, deferred dispatch, no preview side effects, dismissal capture and Escape.\n";
     std::cout << "Actual ImGui panel passed: wheel ownership, scrollbar drag/release outside, game drag isolation and queued close click.\n";
     if(TestParentPanel() || TestNewbornPlan() || TestAdultPlan() || TestScreeningChoices() || TestScreeningRules() || TestNewbornBatch()) return 1;
-    return TestScreeningPanel() || TestScreeningSettingsPanel() || TestLanguagePanel() || TestDisplayPanel();
+    return TestScreeningPanel() || TestScreeningSettingsPanel() || TestLanguagePanel() || TestDisplayPanel() || TestBottomRows();
 }

@@ -357,7 +357,7 @@ bool Initialize(HDC dc) {
         Log("Native sidebar could not start. See mod_logs/chainloader.log for the native-UI diagnostic.");
         MessageBoxA(g_window,"RoomCatList could not initialize its sidebar. Check that all Mod files are from the same version and Mewjector API v3 is installed.","RoomCatList could not start",MB_OK|MB_ICONINFORMATION);
     }
-    Log(std::string("RoomCatList 0.16.2 ready; native sidebar/input startup=") + (native_started ? "yes" : "no") + "; button-anchored grouping, footer text-size controls (75-150%) and English default.");
+    Log(std::string("RoomCatList 0.16.3 ready; native sidebar/input startup=") + (native_started ? "yes" : "no") + "; complete bottom rows and reachable destination selectors at all text sizes.");
     return native_started;
 }
 

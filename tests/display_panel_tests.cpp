@@ -1,10 +1,12 @@
 #include "ui_test_host.hpp"
 #include "newborn_test_fixture.hpp"
 #include <set>
+#include <filesystem>
 
 namespace {
 int queries=0;
 bool accepts=true;
+bool CanMove(const roomcats::RoomSnapshot&,const roomcats::Cat&,const roomcats::CatLocation&,std::string&) { return true; }
 std::vector<roomcats::NpcChoice> Choices(const roomcats::RoomSnapshot&,const roomcats::Cat&) {
     ++queries; return {{0,"NPC",accepts,"Unavailable"},{8,"Discard",true,""}};
 }
@@ -108,5 +110,100 @@ int TestDisplayPanel() {
     Frame(20); CHECK_NEWBORN(queries>before && !g_npc_previews.begin()->second.choices[0].enabled);
     ConfigureCatActions(nullptr,nullptr); ResetListViews(); roomcats::ui::Reset(); ImGui::DestroyContext();
     std::cout << "Display UI passed: 180 cats, stable groups and group sorting, footer +/- mouse clicks, 75-150% text and columns, modal scale, persistence, bounded preferences and cached NPC previews with live action validation.\n";
+    return 0;
+}
+
+int TestBottomRows() {
+    using namespace roomcats; using namespace newborn_test;
+    ImGui::CreateContext(); ui::Apply();
+    auto& io=ImGui::GetIO(); io.IniFilename=io.LogFilename=nullptr;
+    io.DisplaySize={1960,1100}; io.DeltaTime=1.0f/60;
+    const auto root=std::filesystem::path(__FILE__).parent_path().parent_path();
+    ImFontGlyphRangesBuilder ranges; ranges.AddRanges(io.Fonts->GetGlyphRangesDefault());
+    for(const auto& text:UiTextCatalog()) { ranges.AddText(text.first.data()); ranges.AddText(text.second); }
+    ImVector<ImWchar> glyphs; ranges.BuildRanges(&glyphs);
+    CHECK_NEWBORN(io.Fonts->AddFontFromFileTTF((root/"build/assets/native-ui.ttf").string().c_str(),22,nullptr,glyphs.Data));
+    unsigned char* pixels; int width,height; io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    ResetListViews(); g_sort={}; g_group=CatGroup::None; g_font_percent=90; g_pad_frame={};
+    auto house=House(); house.population_comfort_valid=true;
+    house.locations[0].comfort_base=15; house.locations[1].comfort_base=house.locations[2].comfort_base=5;
+    for(int i=0;i<180;++i) {
+        auto cat=MakeCat(i+1,i%5,42,51);
+        if(i) { // The first row is shorter; later two-line cells must still fit.
+            cat.parents={true,{900,901},{"First parent","Second parent"}};
+            cat.details.diseases={{"Condition A","Effect A"},{"Condition B","Effect B"}};
+        }
+        house.cats.push_back(cat);
+    }
+    ConfigureCatActions(Choices,Action); ConfigureCatMoves(CanMove,CanMove); accepts=false;
+    auto click=[&](float x,float y) {
+        g_mouse.Move(int(x),int(y)); io.AddMousePosEvent(x,y); Frame(2);
+        if(g_mouse.Down(1)==MouseOwner::List) io.AddMouseButtonEvent(0,true);
+        Frame();
+        if(g_mouse.Up(1)==MouseOwner::List) io.AddMouseButtonEvent(0,false);
+        Frame(3);
+    };
+    for(const auto language:{Language::Chinese,Language::English})
+    for(int mode=0;mode<3;++mode)
+    for(int percent:{75,90,100,125,150})
+    for(const auto grouping:{CatGroup::None,CatGroup::Location}) {
+        SetLanguage(language); ResetListViews(); g_screening_choices={};
+        g_snapshot=house; g_has_house=g_open=true;
+        for(auto& cat:g_snapshot.cats) cat.details.age=mode==2 ? 10 : 1;
+        if(mode) {
+            g_screening_plan=mode==2 ? PlanAdultCats(g_snapshot,1) : PlanNewbornCats(g_snapshot,1);
+            CHECK_NEWBORN(g_screening_plan->Valid());
+            g_view.screening=true;
+            for(auto& d:g_screening_plan->decisions) d.choice=ReviewChoice::Keep;
+            g_snapshot=ScreeningSnapshot(g_snapshot);
+            CHECK_NEWBORN(g_snapshot.cats.size()==180);
+        }
+        g_move_feedback=mode ? "Change the unavailable destination before confirming." : "Screening complete";
+        SetListFontPercent(percent); SetCatGroup(grouping); g_sort_dirty=g_reset_list_scroll=true;
+        Frame(3);
+        auto* panel=ImGui::FindWindowByName("猫咪列表###RoomCatsPanel"); CHECK_NEWBORN(panel);
+        ImGui::SetWindowSize(panel,grouping==CatGroup::None ? ImVec2{1820,980} : ImVec2{1100,760}); Frame(3);
+        std::string id=mode ? "RoomCatsScreeningRowsV1" : "RoomCatsDetailsRowsV6";
+        if(percent!=100) id+="Font"+std::to_string(percent);
+        auto* table=GImGui->Tables.GetByKey(ImHashStr(id.c_str(),0,panel->ID)); CHECK_NEWBORN(table);
+        auto* rows=table->InnerWindow;
+        const auto last_id=g_snapshot.cats[g_table_rows.back().cat].id;
+        if(mode) { auto* d=ScreeningDecision(last_id); CHECK_NEWBORN(d); d->choice=ReviewChoice::Npc; d->npc=0; }
+        // Verify the actual bottom after wheel scrolling, with and without
+        // the horizontal scrollbar and offscreen two-line columns.
+        for(bool right:{false,true,false}) {
+            ImGui::SetScrollX(rows,right ? rows->ScrollMax.x : 0); Frame(3);
+            const auto middle=table->InnerClipRect.GetCenter();
+            g_mouse.Move(int(middle.x),int(middle.y)); io.AddMousePosEvent(middle.x,middle.y); Frame(2);
+            CHECK_NEWBORN(g_mouse.Wheel()==MouseOwner::List);
+            io.AddMouseWheelEvent(0,-10000); Frame(5);
+            CHECK_NEWBORN(std::abs(rows->Scroll.y-rows->ScrollMax.y)<1);
+            CHECK_NEWBORN(table->RowPosY1>=table->InnerClipRect.Min.y);
+            CHECK_NEWBORN(table->RowPosY1+ImGui::GetStyle().CellPadding.y+panel->CalcFontSize()*2+
+                ImGui::GetStyle().ItemSpacing.y<=table->InnerClipRect.Max.y+1);
+            CHECK_NEWBORN(table->OuterRect.Max.y<panel->DC.CursorMaxPos.y && panel->ScrollMax.y<1);
+        }
+        click(table->Columns[0].WorkMinX+35,table->RowPosY1+ImGui::GetStyle().CellPadding.y+
+            (panel->CalcFontSize()+ImGui::GetStyle().FramePadding.y*2)*.5f);
+        CHECK_NEWBORN(g_mouse.PopupOpen() && g_move_popup_cat==last_id);
+        auto* menu=GImGui->OpenPopupStack.back().Window; CHECK_NEWBORN(menu && menu->Active);
+        CHECK_NEWBORN(menu->Pos.y>=0 && menu->Pos.y+menu->Size.y<=io.DisplaySize.y);
+        const float line=menu->CalcFontSize()+ImGui::GetStyle().ItemSpacing.y;
+        // Normal list: queue the last cat for the box. Review: replace its
+        // unavailable NPC with Keep, then verify confirmation is unblocked.
+        click(menu->WorkRect.Min.x+35,menu->WorkRect.Min.y+(mode ? 1 : 5)*line+menu->CalcFontSize()*.5f);
+        CHECK_NEWBORN(!g_mouse.PopupOpen());
+        if(mode) {
+            CHECK_NEWBORN(ScreeningDecision(last_id)->choice==ReviewChoice::Keep);
+            ImGui::ActivateItemByID(ImHashStr(Tx("确定处理"),0,panel->ID)); Frame(2);
+            CHECK_NEWBORN(g_confirm_screening); g_confirm_screening=false;
+            std::string reason;
+            CHECK_NEWBORN(BeginNewbornBatch(*g_screening_plan,g_screening_plan->source,reason));
+            StopNewbornBatch(); // No queued command is executed in this UI test.
+        } else { CHECK_NEWBORN(HasPendingCatMove()); CancelCatMove(); }
+    }
+    ConfigureCatActions(nullptr,nullptr); ConfigureCatMoves(nullptr,nullptr); accepts=true;
+    ResetListViews(); ui::Reset(); ImGui::DestroyContext();
+    std::cout << "Bottom rows passed: native font/metrics, 75-150%, 180 cats, both languages, resized/grouped tables, both scroll axes, last-row box and review choices, confirmation without native writes.\n";
     return 0;
 }

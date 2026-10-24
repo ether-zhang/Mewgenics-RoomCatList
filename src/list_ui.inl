@@ -479,7 +479,14 @@ void DrawUi() {
                 if (g_sort_dirty || g_sorted_rows.size() != g_snapshot.cats.size()) {
                     RebuildTableRows();
                 }
-                const float row_height = ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y + ImGui::GetStyle().CellPadding.y * 2;
+                // Combos set a padded text baseline for the rest of the row.
+                // Two-line name/parent cells inherit that offset too. Reserve
+                // it in every row (including group headers), otherwise the
+                // clipper underestimates the scroll range and cuts off the end.
+                // Round up so fractional font sizes keep one stable stride.
+                const auto& style = ImGui::GetStyle();
+                const float row_height = std::ceil(std::max(ImGui::GetFrameHeight(),
+                    ImGui::GetTextLineHeight() * 2 + style.ItemSpacing.y + style.FramePadding.y) + style.CellPadding.y * 2);
                 ImGuiListClipper clipper;
                 clipper.Begin(static_cast<int>(g_table_rows.size()),row_height);
                 if (g_move_popup_cat)
